@@ -28,30 +28,21 @@ function trimSentences(text: string, maxChars = 420): string {
   return slice.replace(/\s+\S*$/, '') + '…';
 }
 
-function getStyleOpening(style: VoiceStyle, topicTitle: string): string {
+function getStyleOpening(style: VoiceStyle, _topicTitle: string): string {
   switch (style) {
     case 'blunt':
-      return `Let’s strip away the noise around **${topicTitle}** and look at what the evidence and incentives actually show.`;
+      return `The short version comes down to incentives and accountability rather than surface framing:`;
     case 'academic':
-      return `Approaching **${topicTitle}** from an international law and governance standpoint requires separating normative rhetoric from enforceable structure.`;
+      return `Looking at this through international law and institutional design:`;
     case 'mentor':
-      return `This touches something I’ve written about quite candidly in **${topicTitle}** — and the short answer is less about polish and more about evidence.`;
+      return `Here is how I tend to think through that in practice:`;
     default:
-      return `Here is how I think about this, drawing directly on my work in **${topicTitle}**.`;
+      return `Here is where I stand on this:`;
   }
 }
 
-function getStyleClosing(style: VoiceStyle): string {
-  switch (style) {
-    case 'blunt':
-      return `If a framework has no enforcement mechanism, no traceable human responsibility, and no cost for non-compliance, it isn’t governance — it’s PR.`;
-    case 'academic':
-      return `Ultimately, durable governance depends on translating these normative arguments into binding legal standards, pre-deployment review, and verifiable human accountability.`;
-    case 'mentor':
-      return `The thread running through all of this is simple: demand context, keep receipts of real evidence rather than noise, and build things that hold up under scrutiny.`;
-    default:
-      return `In short: context, structural accountability, and human judgement have to sit at the foundation — you cannot bolt them on after deployment.`;
-  }
+function getStyleClosing(_style: VoiceStyle): string {
+  return '';
 }
 
 function buildFollowUps(sources: RetrievedSource[], query: string): string[] {
@@ -234,9 +225,9 @@ export function synthesizeInstantAviReply(
       getStyleOpening(style, primary.entry.title),
       ``,
       ...bulletParts.map((b, i) => (i === 0 ? b : `- ${b}`)),
-      ``,
-      getStyleClosing(style),
     ];
+    const closing = getStyleClosing(style);
+    if (closing) lines.push(``, closing);
 
     const dois = [primary, ...secondary].filter((s) => s.entry.doi);
     if (dois.length > 0) {

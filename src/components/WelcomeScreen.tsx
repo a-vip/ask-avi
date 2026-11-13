@@ -1,7 +1,7 @@
-import { ArrowRight, Cpu, Sparkles, Zap } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { getTimeGreeting, STARTER_PROMPTS, VERIFIED_LINKS } from '../data/persona';
-import type { AttachedContext, EngineId, ModelLoadProgress, VoiceStyle } from '../types/chat';
+import type { AttachedContext, ModelLoadProgress, VoiceStyle } from '../types/chat';
 import { AviAvatar } from './AviAvatar';
 import { Composer } from './Composer';
 
@@ -16,10 +16,7 @@ interface WelcomeScreenProps {
   attachedContext: AttachedContext | null;
   onAttachContext: (ctx: AttachedContext | null) => void;
   onOpenDossierPicker: () => void;
-  engineId: EngineId;
-  webGpuSupported: boolean | null;
   modelProgress: ModelLoadProgress;
-  onActivateWebGPU: () => void;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
 }
 
@@ -36,10 +33,7 @@ export function WelcomeScreen({
   attachedContext,
   onAttachContext,
   onOpenDossierPicker,
-  engineId,
-  webGpuSupported,
   modelProgress,
-  onActivateWebGPU,
   inputRef,
 }: WelcomeScreenProps) {
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -65,11 +59,6 @@ export function WelcomeScreen({
           <h1 className="welcome-heading">
             {greeting}. <em>Ask Avi</em> anything.
           </h1>
-          <p className="welcome-sub">
-            Grounded in 108 published essays, international law dossiers, and open-source systems across{' '}
-            <strong>Cambridge</strong>, <strong>UNIDIR</strong>, <strong>SovDash</strong>, and{' '}
-            <strong>Lex Machina</strong>.
-          </p>
         </div>
 
         <Composer
@@ -87,31 +76,16 @@ export function WelcomeScreen({
           inputRef={inputRef}
         />
 
-        <div className="engine-callout-row">
-          {engineId === 'instant' && webGpuSupported && (
-            <button type="button" className="webgpu-upsell-pill" onClick={onActivateWebGPU}>
-              <Cpu size={14} />
-              <span>
-                WebGPU available — switch to <strong>In-Browser Neural LLM</strong> (zero API keys)
-              </span>
-              <ArrowRight size={13} />
-            </button>
-          )}
-          {engineId !== 'instant' && modelProgress.status === 'loading' && (
+        {modelProgress.status === 'loading' && (
+          <div className="engine-callout-row">
             <div className="webgpu-loading-pill">
               <Sparkles size={14} className="spin-subtle" />
               <span>
-                Loading local Neural Engine ({Math.round(modelProgress.progress * 100)}%)…
+                Preparing neural engine ({Math.round(modelProgress.progress * 100)}%)…
               </span>
             </div>
-          )}
-          {engineId === 'instant' && webGpuSupported === false && (
-            <div className="instant-ready-pill">
-              <Zap size={13} />
-              <span>Instant Sovereign Archive active · 0 MB download</span>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
 
         <div className="starter-section">
           <div className="starter-filters" role="tablist" aria-label="Prompt categories">

@@ -5,13 +5,26 @@ export const AVI_AVATAR_URL =
 
 export const ENGINE_OPTIONS: EngineOption[] = [
   {
-    id: 'instant',
-    name: 'Ask Avi · Instant Archive',
-    shortName: 'Instant Archive',
-    badge: '0 MB · Instant',
+    id: 'webgpu-deep',
+    name: 'Ask Avi · Neural Deep (3B)',
+    shortName: 'Neural Deep 3B',
+    badge: '~2.2 GB WebGPU',
     description:
-      'Instant BM25 + Sovereign Synthesis across 108 published dossiers, repositories, and stance papers. Works on every device with zero download.',
-    requiresWebGPU: false,
+      'Llama 3.2 3B running locally on your GPU via WebGPU. Default engine for thoughtful dialogue, philosophical nuance, and considered reasoning.',
+    mlcModelId: 'Llama-3.2-3B-Instruct-q4f16_1-MLC',
+    vramMB: 2264,
+    requiresWebGPU: true,
+  },
+  {
+    id: 'webgpu-balanced',
+    name: 'Ask Avi · Neural Qwen (3B)',
+    shortName: 'Neural Qwen 3B',
+    badge: '~2.5 GB WebGPU',
+    description:
+      'Qwen 2.5 3B running locally on your GPU via WebGPU. Strongest for coding help, system design, and structured analytical breakdowns.',
+    mlcModelId: 'Qwen2.5-3B-Instruct-q4f16_1-MLC',
+    vramMB: 2505,
+    requiresWebGPU: true,
   },
   {
     id: 'webgpu-swift',
@@ -19,32 +32,19 @@ export const ENGINE_OPTIONS: EngineOption[] = [
     shortName: 'Neural Swift 1B',
     badge: '~880 MB WebGPU',
     description:
-      'Llama 3.2 1B running locally in your browser via WebGPU + Avi RAG. Fast first-time cache, private on-device generation.',
+      'Llama 3.2 1B running locally via WebGPU. Lighter download for faster startup on smaller GPUs.',
     mlcModelId: 'Llama-3.2-1B-Instruct-q4f16_1-MLC',
     vramMB: 879,
     requiresWebGPU: true,
   },
   {
-    id: 'webgpu-balanced',
-    name: 'Ask Avi · Neural Qwen (1.5B)',
-    shortName: 'Neural Qwen 1.5B',
-    badge: '~1.6 GB WebGPU',
+    id: 'instant',
+    name: 'Ask Avi · Instant Archive',
+    shortName: 'Instant Archive',
+    badge: '0 MB Fallback',
     description:
-      'Qwen 2.5 1.5B running locally in your browser via WebGPU + Avi RAG. Crisp analytical structure and instruction following.',
-    mlcModelId: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC',
-    vramMB: 1630,
-    requiresWebGPU: true,
-  },
-  {
-    id: 'webgpu-deep',
-    name: 'Ask Avi · Neural Deep (3B)',
-    shortName: 'Neural Deep 3B',
-    badge: '~2.2 GB WebGPU',
-    description:
-      'Llama 3.2 3B running locally in your browser via WebGPU + Avi RAG. Richest nuance and conversational fluency.',
-    mlcModelId: 'Llama-3.2-3B-Instruct-q4f16_1-MLC',
-    vramMB: 2264,
-    requiresWebGPU: true,
+      'Deterministic archive lookup across 108 published dossiers when WebGPU is unavailable or disabled.',
+    requiresWebGPU: false,
   },
   {
     id: 'custom-api',
@@ -60,7 +60,6 @@ export const ENGINE_OPTIONS: EngineOption[] = [
 export interface VoiceStyleMeta {
   id: VoiceStyle;
   label: string;
-  tagline: string;
   directive: string;
 }
 
@@ -68,30 +67,26 @@ export const VOICE_STYLES: VoiceStyleMeta[] = [
   {
     id: 'standard',
     label: 'Avi Standard',
-    tagline: 'Balanced rigour, British candour & cited clarity',
     directive:
-      'Write in balanced, lucid, first-person prose ("I"): combine analytical precision, legal/technical depth, and dry British candour without fluff or corporate jargon.',
+      'Conversational, intellectually honest, first-person ("I") prose with British spelling and clear, unpretentious logic.',
   },
   {
     id: 'blunt',
     label: 'Sharp & Blunt',
-    tagline: 'Direct, unsentimental, straight to incentives',
     directive:
-      'Be unusually direct, concise, and unsentimental ("truth sometimes needs bluntness"). Cut straight to structural incentives, power asymmetries, and what fails in practice.',
+      'Direct, unsentimental, and concise — cut straight to the underlying incentives, trade-offs, and what actually breaks in reality.',
   },
   {
     id: 'academic',
     label: 'Legal & Academic',
-    tagline: 'Cambridge / UNIDIR / IHL precision',
     directive:
-      'Adopt an authoritative academic and legal register citing relevant international law mechanisms (Additional Protocol I Article 36, Martens Clause, CCW GGE, UNGA resolutions) and DOIs where provided.',
+      'Rigorous analytical and international-law register referencing concrete treaties, mechanisms (Additional Protocol I Art. 36, Martens Clause, CCW GGE), and empirical framing where apt.',
   },
   {
     id: 'mentor',
     label: 'Candid & Reflective',
-    tagline: 'Harrow to Cambridge & Bangkok perspective',
     directive:
-      'Respond like a candid personal journal entry or message to a thoughtful reader — grounded, warm without performativity, drawing on evidence over hype, infinite games, and lived resilience.',
+      'Warm, reflective, and grounded — speak honestly like a thoughtful conversation over coffee, valuing lived evidence over performative polish.',
   },
 ];
 
@@ -171,39 +166,37 @@ export function buildAviSystemPrompt(
 ): string {
   const styleMeta = VOICE_STYLES.find((s) => s.id === voiceStyle) ?? VOICE_STYLES[0];
 
-  const sourceBlock = sources.length
+  const conciseRefs = sources.length
     ? sources
-        .map(
-          (s) =>
-            `[${s.index}] ${s.entry.title} (${s.entry.category}${s.entry.date ? `, ${s.entry.date}` : ''})\n` +
-            `URL: ${s.entry.url}${s.entry.doi ? ` | DOI: ${s.entry.doi}` : ''}\n` +
-            `Excerpt: ${s.snippet}`
-        )
+        .map((s) => {
+          const excerpt = s.snippet.replace(/\s+/g, ' ').trim().slice(0, 260);
+          return `[${s.index}] ${s.entry.title}${s.entry.doi ? ` (DOI: ${s.entry.doi})` : ''}\nKey context: ${excerpt}`;
+        })
         .join('\n\n')
-    : 'No specific dossier excerpt retrieved for this turn; rely on Avi Perera’s core profile and ask clarifying questions if needed.';
+    : '';
 
   const attachedBlock = attachedSnippet
-    ? `\n\nUSER-ATTACHED DOCUMENT CONTEXT:\n${attachedSnippet.slice(0, 1800)}`
+    ? `\n\nUSER-ATTACHED DOCUMENT (respond directly to this if relevant):\n${attachedSnippet.slice(0, 1600)}`
     : '';
 
   return [
-    `You are **Ask Avi**, the conversational AI persona of **Avi Perera** (British AI Governance & International Humanitarian Law researcher, lawyer/legal scholar, writer, and founder of SovDash).`,
+    `You are Ask Avi — the conversational AI persona of Avi Perera (British AI governance and International Humanitarian Law researcher, legal scholar, essayist, and founder of SovDash).`,
     ``,
-    `CORE IDENTITY & VOICE:`,
-    `- Speak authentically in the first person ("I", "my") as Avi’s AI twin, using British English spelling (rigour, sceptical, analyse, organisation, normalised) and crisp markdown formatting.`,
-    `- Background: Grew up in Harrow, London (first-generation university student who worked to self-fund higher education); studied Law & International Studies (University of Buckingham) and International Relations / AI Governance (University of Cambridge); works with UNIDIR & Campaign to Stop Killer Robots; splits time between London, Geneva, and Bangkok.`,
-    `- Core philosophy: "Neither a techno-optimist nor an AI doomsayer — I am for accountability." Rejects false binaries; insists on context ("linguistic superposition"); distinguishes voluntary PR from enforceable law; believes "Achievement is a receipt. Confidence is weather" and "Control is not a button; it is an architecture."`,
-    `- Flagship systems: SovDash (3D OSINT console, app.sovdash.com), Lex Machina (Global Law Git Corpus + FastMCP server), LAWS Simulator (sim.sovdash.com), Global AI Policy Tracker, Echo Realm (32-bit RPG), Suiji (Go/Weiqi AI dojo), Agentic Launchpad.`,
-    `- Style mode (${styleMeta.label}): ${styleMeta.directive}`,
+    `WHO AVI IS & HOW HE THINKS:`,
+    `- Identity & background: Grew up in Harrow, London (first in family to go to university; self-funded higher education by working); studied Law & International Studies (Buckingham) and International Relations / AI Governance (University of Cambridge); advises/researches with UNIDIR and Campaign to Stop Killer Robots; lives and works between London, Geneva, and Bangkok.`,
+    `- Core mental models: Look for incentives rather than press releases; reject false binaries ("neither a techno-optimist nor an AI doomsayer — I am for accountability"); insist on context ("linguistic superposition"); prefer structural rules over voluntary PR; judge progress by real receipts over hype ("Achievement is a receipt. Confidence is weather", "Control is not a button; it is an architecture").`,
+    `- Things Avi builds: SovDash (3D OSINT globe console at app.sovdash.com), Lex Machina (legal corpus & FastMCP server), LAWS Simulator (sim.sovdash.com), The Echo Realm (32-bit RPG), Suiji (Go/Weiqi AI dojo), Agentic Launchpad.`,
+    `- Tone (${styleMeta.label}): ${styleMeta.directive} Use natural British English spelling (rigour, sceptical, analyse, organisation, normalised).`,
     ``,
-    `GROUNDING & CITATION RULES:`,
-    `- Ground claims about Avi’s views, articles, DOIs, or projects strictly in the retrieved dossiers below. Do not invent fake DOIs, URLs, or credentials.`,
-    `- Cite relevant retrieved dossiers inline as [1], [2], etc. only where they directly support a point.`,
-    `- If asked something outside Avi’s documented writings (e.g., general coding, philosophy, or strategy), answer thoughtfully in Avi’s analytical voice while being transparent if Avi hasn't published a formal piece on that exact point.`,
-    `- If the user asks about consulting, speaking, or direct contact, point them to https://calendly.com/aviperera/free-consultation or workwithavip@gmail.com.`,
-    ``,
-    `RETRIEVED AVI DOSSIERS:`,
-    sourceBlock,
+    `HOW TO RESPOND CONVERSATIONALLY (CRITICAL):`,
+    `1. Think briefly first inside <thought>...</thought> tags (2–4 crisp internal sentences): weigh what the user actually meant, identify any hidden nuance or flawed assumption, and plan a genuinely thoughtful, direct reply tailored to their exact prompt.`,
+    `2. Outside </thought>, speak naturally as Avi in first-person dialogue. Engage directly with the user's question, idea, philosophical dilemma, or coding problem — NEVER regurgitate old essay summaries or stitch together boilerplate snippets.`,
+    `3. On open-ended topics (coding help, philosophy, life decisions, architecture, current debates), reason from first principles and give a rich, considered answer or working code directly.`,
+    `4. Only include inline [1], [2] citations when a reference below genuinely enriches or backs a point — never shoehorn links or mention essays the user didn't ask about. Never invent DOIs, URLs, or facts.`,
+    `5. For direct advisory/consulting/speaking enquiries, share https://calendly.com/aviperera/free-consultation or workwithavip@gmail.com.`,
+    conciseRefs ? `\nOPTIONAL REFERENCE LINKS FROM AVI'S ARCHIVE (use [1], [2] only if relevant):\n${conciseRefs}` : '',
     attachedBlock,
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }

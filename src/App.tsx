@@ -64,12 +64,12 @@ export default function App() {
   const [webGpuSupported, setWebGpuSupported] = useState<boolean | null>(null);
   const [webGpuReason, setWebGpuReason] = useState<string | undefined>(undefined);
   const [cachedModels, setCachedModels] = useState<Record<string, boolean>>({});
-  const [modelProgress, setModelProgress] = useState<ModelLoadProgress>({
-    engineId: 'instant',
+  const [modelProgress, setModelProgress] = useState<ModelLoadProgress>(() => ({
+    engineId: settings.engineId,
     status: 'idle',
     progress: 0,
     text: '',
-  });
+  }));
 
   const abortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -95,7 +95,7 @@ export default function App() {
     saveThreads(threads);
   }, [threads]);
 
-  // Detect WebGPU & model caches on boot
+  // Detect WebGPU & model caches on boot; auto-warm cached model or fallback gracefully
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -106,6 +106,23 @@ export default function App() {
       setWebGpuReason(gpu.reason);
       setCachedModels(caches);
       postParentBridgeEvent('ready', { webgpu: gpu.supported });
+
+      const activeOpt = ENGINE_OPTIONS.find((o) => o.id === settings.engineId);
+      if (!gpu.supported && activeOpt?.requiresWebGPU) {
+        setSettings((prev) => ({ ...prev, engineId: 'instant' }));
+      } else if (gpu.supported && activeOpt?.requiresWebGPU && caches[settings.engineId]) {
+        void llmService
+          .loadWebGPUModel(settings.engineId, (p) => {
+            if (!mounted) return;
+            setModelProgress(p);
+            if (p.status === 'ready') {
+              setCachedModels((prev) => ({ ...prev, [p.engineId]: true }));
+            }
+          })
+          .catch(() => {
+            // Ignored on silent background warmup; interactive path surfaces errors if needed
+          });
+      }
     })();
     return () => {
       mounted = false;
@@ -643,13 +660,7 @@ export default function App() {
                 setDrawerTab('archive');
                 setKnowledgeOpen(true);
               }}
-              engineId={settings.engineId}
-              webGpuSupported={webGpuSupported}
               modelProgress={modelProgress}
-              onActivateWebGPU={() => {
-                handleSelectEngine('webgpu-swift');
-                void handlePreloadWebGPU('webgpu-swift');
-              }}
               inputRef={inputRef}
             />
           ) : (

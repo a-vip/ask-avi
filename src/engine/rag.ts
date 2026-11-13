@@ -112,10 +112,11 @@ class KnowledgeIndex {
 
   public search(
     query: string,
-    options?: { topK?: number; conversationHint?: string }
+    options?: { topK?: number; conversationHint?: string; minScore?: number }
   ): { sources: RetrievedSource[]; elapsedMs: number } {
     const start = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    const topK = options?.topK ?? 4;
+    const topK = options?.topK ?? 3;
+    const minScore = options?.minScore ?? 2.6;
     const rawTokens = tokenize(query);
     const queryTokens = normalizeQueryTokens(
       options?.conversationHint && rawTokens.length <= 4
@@ -124,15 +125,8 @@ class KnowledgeIndex {
     );
 
     if (queryTokens.length === 0) {
-      const fallback = this.docs.slice(0, Math.min(3, topK)).map((d, idx) => ({
-        index: idx + 1,
-        entry: d.entry,
-        score: 1,
-        matchedTerms: [],
-        snippet: d.entry.chunks[0] ?? d.entry.summary,
-      }));
       const end = typeof performance !== 'undefined' ? performance.now() : Date.now();
-      return { sources: fallback, elapsedMs: Math.max(1, Math.round(end - start)) };
+      return { sources: [], elapsedMs: Math.max(1, Math.round(end - start)) };
     }
 
     const N = this.docs.length;
@@ -178,13 +172,16 @@ class KnowledgeIndex {
 
     scored.sort((a, b) => b.score - a.score);
 
-    const sources: RetrievedSource[] = scored.slice(0, topK).map((item, idx) => ({
-      index: idx + 1,
-      entry: item.doc.entry,
-      score: Number(item.score.toFixed(2)),
-      matchedTerms: item.matched,
-      snippet: pickBestSnippet(item.doc.entry, item.matched),
-    }));
+    const sources: RetrievedSource[] = scored
+      .filter((item) => item.score >= minScore)
+      .slice(0, topK)
+      .map((item, idx) => ({
+        index: idx + 1,
+        entry: item.doc.entry,
+        score: Number(item.score.toFixed(2)),
+        matchedTerms: item.matched,
+        snippet: pickBestSnippet(item.doc.entry, item.matched),
+      }));
 
     const end = typeof performance !== 'undefined' ? performance.now() : Date.now();
     return { sources, elapsedMs: Math.max(1, Math.round(end - start)) };

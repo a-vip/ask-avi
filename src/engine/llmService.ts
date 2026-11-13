@@ -15,6 +15,7 @@ import type {
   RetrievedSource,
   VoiceStyle,
 } from '../types/chat';
+import { splitThinkingAndAnswer } from '../utils/thinking';
 import { synthesizeInstantAviReply } from './instantSynthesizer';
 import { knowledgeIndex } from './rag';
 
@@ -200,7 +201,8 @@ class AviLLMService {
       .join(' ');
 
     const { sources, elapsedMs } = knowledgeIndex.search(params.query, {
-      topK: 4,
+      topK: 3,
+      minScore: params.engineId === 'instant' ? 2.6 : 4.2,
       conversationHint: recentUserHint,
     });
     params.onSources(sources, elapsedMs);
@@ -216,7 +218,7 @@ class AviLLMService {
         modelLabel: params.customApi.modelName,
         sources,
         retrievalMs: elapsedMs,
-        followUps: deriveContextualFollowUps(sources),
+        followUps: deriveContextualFollowUps(sources, text),
       };
     }
 
@@ -238,13 +240,7 @@ class AviLLMService {
           params.attachedContext?.content
         );
 
-        const trimmedHistory = params.history
-          .filter((m) => !m.isStreaming && m.content.trim().length > 0)
-          .slice(-4)
-          .map((m) => ({
-            role: m.role as 'user' | 'assistant',
-            content: m.content.slice(0, 900),
-          }));
+        const trimmedHistory = buildHistoryWindow(params.history, 8, 3400);
 
         const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
           { role: 'system', content: systemPrompt },
@@ -255,8 +251,11 @@ class AviLLMService {
         const chunks = await engine.chat.completions.create({
           messages,
           stream: true,
-          temperature: params.voiceStyle === 'academic' ? 0.45 : 0.65,
-          max_tokens: 850,
+          temperature: params.voiceStyle === 'academic' ? 0.52 : 0.72,
+          top_p: 0.9,
+          frequency_penalty: 0.15,
+          presence_penalty: 0.18,
+          max_tokens: 1150,
         });
 
         let accumulated = '';
@@ -273,13 +272,14 @@ class AviLLMService {
         }
 
         if (accumulated.trim().length > 0) {
+          const { answer } = splitThinkingAndAnswer(accumulated);
           return {
             markdown: accumulated,
             engineUsed: params.engineId,
             modelLabel: opt.shortName,
             sources,
             retrievalMs: elapsedMs,
-            followUps: deriveContextualFollowUps(sources),
+            followUps: deriveContextualFollowUps(sources, answer || accumulated),
           };
         }
       } catch (err) {
@@ -295,7 +295,7 @@ class AviLLMService {
           params.voiceStyle,
           params.attachedContext
         );
-        const fullText = `${synth.markdown}\n\n---\n*Engine note: ${fallbackReason}*`;
+        const fullText = `${synth.markdown}\n\n---\n*Note: WebGPU fallback active (${fallbackReason})*`;
         await streamTextSmoothly(fullText, params.onToken, params.signal);
         return {
           markdown: fullText,
@@ -308,10 +308,22 @@ class AviLLMService {
       }
     }
 
-    // 3. Instant Sovereign Archive Engine (0 MB default)
+    // 3. Instant Sovereign Archive Engine (Fallback / offline mode)
+    const fallbackSources =
+      sources.length > 0
+        ? sources
+        : knowledgeIndex.search(params.query, {
+            topK: 3,
+            minScore: 2.6,
+            conversationHint: recentUserHint,
+          }).sources;
+    if (fallbackSources.length !== sources.length) {
+      params.onSources(fallbackSources, elapsedMs);
+    }
+
     const synth = synthesizeInstantAviReply(
       params.query,
-      sources,
+      fallbackSources,
       params.voiceStyle,
       params.attachedContext
     );
@@ -321,7 +333,7 @@ class AviLLMService {
       markdown: synth.markdown,
       engineUsed: 'instant',
       modelLabel: 'Instant Archive',
-      sources,
+      sources: fallbackSources,
       retrievalMs: elapsedMs,
       followUps: synth.followUps,
     };
@@ -339,10 +351,7 @@ class AviLLMService {
     );
     const messages = [
       { role: 'system', content: systemPrompt },
-      ...params.history
-        .filter((m) => !m.isStreaming && m.content.trim().length > 0)
-        .slice(-6)
-        .map((m) => ({ role: m.role, content: m.content })),
+      ...buildHistoryWindow(params.history, 10, 6000),
       { role: 'user', content: params.query },
     ];
 
@@ -425,18 +434,58 @@ async function streamTextSmoothly(
   }
 }
 
-function deriveContextualFollowUps(sources: RetrievedSource[]): string[] {
-  const first = sources[0]?.entry;
-  const second = sources[1]?.entry;
+function buildHistoryWindow(
+  history: ChatMessage[],
+  maxTurns: number,
+  maxChars: number
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  const candidates = history
+    .filter((m) => !m.isStreaming && m.content.trim().length > 0)
+    .slice(-maxTurns)
+    .map((m) => {
+      const cleaned =
+        m.role === 'assistant' ? splitThinkingAndAnswer(m.content).answer || m.content : m.content;
+      return {
+        role: m.role as 'user' | 'assistant',
+        content: cleaned.trim().slice(0, 1100),
+      };
+    });
+
+  const selected: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  let charBudget = maxChars;
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const turn = candidates[i];
+    if (selected.length > 0 && turn.content.length > charBudget) break;
+    charBudget -= turn.content.length;
+    selected.unshift(turn);
+  }
+  return selected;
+}
+
+function deriveContextualFollowUps(sources: RetrievedSource[], answerText = ''): string[] {
   const list: string[] = [];
-  if (first) {
-    list.push(`Can you go deeper into the legal or structural argument in "${first.title.slice(0, 46)}${first.title.length > 46 ? '…' : ''}"?`);
+  if (sources.length > 0) {
+    const first = sources[0]?.entry;
+    if (first) {
+      list.push(
+        `How does your argument in "${first.title.slice(0, 44)}${first.title.length > 44 ? '…' : ''}" apply in practice?`
+      );
+    }
+    if (sources[1]) {
+      list.push(
+        `What is the main tension or counter-argument to watch out for here?`
+      );
+    }
+    return list.slice(0, 2);
   }
-  if (second) {
-    list.push(`How does this connect to ${second.title.slice(0, 48)}${second.title.length > 48 ? '…' : ''}?`);
+
+  if (/```/.test(answerText)) {
+    list.push('Can we stress-test edge cases or simplify this implementation?');
+    list.push('How would you structure this for production?');
+    return list;
   }
-  list.push('What concrete action or policy reform follows from this?');
-  return list.slice(0, 3);
+
+  return [];
 }
 
 export const llmService = new AviLLMService();

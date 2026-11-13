@@ -186,7 +186,7 @@ export function Composer({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask Avi anything about AI governance, LAWS, projects, or life…"
+          placeholder="Ask Avi anything…"
           aria-label="Message Ask Avi"
           className="composer-input"
         />
@@ -215,10 +215,7 @@ export function Composer({
                     }}
                   >
                     <BookOpen size={14} />
-                    <div>
-                      <strong>Attach an Avi Dossier</strong>
-                      <span>Pick from 108 essays &amp; projects</span>
-                    </div>
+                    <strong>Attach a dossier</strong>
                   </button>
                   <button
                     type="button"
@@ -226,10 +223,7 @@ export function Composer({
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <FileText size={14} />
-                    <div>
-                      <strong>Upload .txt or .md snippet</strong>
-                      <span>Discuss your draft or policy note</span>
-                    </div>
+                    <strong>Upload .txt or .md</strong>
                   </button>
                 </div>
               )}
@@ -247,7 +241,7 @@ export function Composer({
                 type="button"
                 className="tool-chip-btn"
                 onClick={() => setStyleOpen((p) => !p)}
-                title="Adjust Avi's tone and register"
+                title="Adjust Avi's response voice"
               >
                 <span>{activeStyle.label}</span>
                 <ChevronDown size={13} />
@@ -266,10 +260,7 @@ export function Composer({
                         setStyleOpen(false);
                       }}
                     >
-                      <div className="style-item-text">
-                        <strong>{style.label}</strong>
-                        <span>{style.tagline}</span>
-                      </div>
+                      <strong className="style-item-text">{style.label}</strong>
                       {voiceStyle === style.id && <Check size={14} className="check-icon" />}
                     </button>
                   ))}
@@ -319,11 +310,7 @@ export function Composer({
 
       {!centered && (
         <p className="composer-disclaimer">
-          Ask Avi is an AI persona grounded in Avi Perera’s published work. Verify legal citations against{' '}
-          <a href="https://aviperera.com/research/" target="_blank" rel="noopener noreferrer">
-            canonical dossiers
-          </a>
-          .
+          Ask Avi can make mistakes. Please double-check responses.
         </p>
       )}
     </div>

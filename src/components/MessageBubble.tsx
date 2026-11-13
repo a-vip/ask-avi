@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  Brain,
   Check,
   ChevronDown,
   ChevronRight,
@@ -17,6 +18,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage, ModelLoadProgress, RetrievedSource } from '../types/chat';
 import { renderMarkdownToSafeHtml } from '../utils/markdown';
+import { splitThinkingAndAnswer } from '../utils/thinking';
 import { AviAvatar } from './AviAvatar';
 
 interface MessageBubbleProps {
@@ -46,15 +48,23 @@ export function MessageBubble({
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(message.content);
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
+  const [thinkingExpanded, setThinkingExpanded] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
 
   const sourcesCount = message.sources?.length ?? 0;
 
+  const { thinking, answer, isThinking } = useMemo(() => {
+    if (message.role !== 'assistant') {
+      return { thinking: '', answer: message.content, isThinking: false };
+    }
+    return splitThinkingAndAnswer(message.content);
+  }, [message.role, message.content]);
+
   const renderedHtml = useMemo(() => {
-    if (message.role !== 'assistant' || !message.content) return '';
-    return renderMarkdownToSafeHtml(message.content, sourcesCount);
-  }, [message.role, message.content, sourcesCount]);
+    if (message.role !== 'assistant' || !answer) return '';
+    return renderMarkdownToSafeHtml(answer, sourcesCount);
+  }, [message.role, answer, sourcesCount]);
 
   // Delegated click handler for [1] citation pills & code block copy buttons
   useEffect(() => {
@@ -102,7 +112,7 @@ export function MessageBubble({
 
   const handleCopyMessage = async () => {
     try {
-      await navigator.clipboard.writeText(message.content);
+      await navigator.clipboard.writeText(answer || message.content);
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
     } catch {
@@ -118,7 +128,7 @@ export function MessageBubble({
       return;
     }
     window.speechSynthesis.cancel();
-    const plain = message.content
+    const plain = (answer || message.content)
       .replace(/\[\d+\]/g, '')
       .replace(/```[\s\S]*?```/g, 'Code snippet omitted.')
       .replace(/[*_`#>]/g, '');
@@ -265,6 +275,25 @@ export function MessageBubble({
           </div>
         )}
 
+        {(thinking || (isThinking && message.isStreaming)) && (
+          <div className="thinking-trace">
+            <button
+              type="button"
+              className={`thinking-toggle-btn ${isThinking && message.isStreaming ? 'live' : ''}`}
+              onClick={() => setThinkingExpanded((p) => !p)}
+              aria-expanded={thinkingExpanded}
+            >
+              <Brain size={13} />
+              <span>{isThinking && message.isStreaming ? 'Thinking…' : 'Thought process'}</span>
+              {thinkingExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            </button>
+
+            {thinkingExpanded && thinking && (
+              <div className="thinking-body">{thinking}</div>
+            )}
+          </div>
+        )}
+
         {showModelWarmup ? (
           <div className="model-warmup-card">
             <div className="warmup-top">
@@ -284,22 +313,22 @@ export function MessageBubble({
             </p>
             <button type="button" className="warmup-fallback-btn" onClick={onFallbackToInstant}>
               <Zap size={13} />
-              <span>Skip wait &amp; answer immediately via Instant Archive</span>
+              <span>Use Instant Archive fallback instead</span>
             </button>
           </div>
-        ) : message.isStreaming && !message.content ? (
+        ) : message.isStreaming && !answer && !isThinking ? (
           <div className="thinking-dots" aria-label="Thinking">
             <span />
             <span />
             <span />
           </div>
-        ) : (
+        ) : answer ? (
           <div
             ref={contentRef}
             className={`markdown-prose ${message.isStreaming ? 'streaming-cursor' : ''}`}
             dangerouslySetInnerHTML={{ __html: renderedHtml }}
           />
-        )}
+        ) : null}
 
         {!message.isStreaming && message.content && (
           <>

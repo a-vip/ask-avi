@@ -8,15 +8,15 @@
 
 ## Key Capabilities
 
-- **Dual Sovereign Inference Architecture (Zero Mandatory Backend / Zero API Key)**
-  1. **Instant Archive Engine (Default):** Deterministic TF-IDF / BM25-weighted multi-field retrieval across **108 sovereign knowledge entries** (8 Core Identity Pillars + 100 Archive Dossiers spanning published DOIs, UNIDIR/IHL briefings, SovDash architecture, AI governance essays, and Avi's personal story), paired with a structured persona synthesizer that responds in milliseconds on any device.
-  2. **In-Browser WebGPU LLM (`@mlc-ai/web-llm`):** Optional local frontier inference running 100% on the visitor's GPU inside a dedicated Web Worker (`Llama-3.2-1B`, `Qwen2.5-1.5B`, or `Llama-3.2-3B` quantized MLC models) with live download progress and browser cache management.
+- **Hybrid Sovereign Inference Architecture (Zero Mandatory Backend / Zero API Key)**
+  1. **In-Browser WebGPU LLM (Default via `@mlc-ai/web-llm`):** Real open-ended generative reasoning running 100% locally in a dedicated Web Worker (`Neural Deep 3B` via `Llama-3.2-3B-Instruct`, `Neural Qwen 3B` via `Qwen2.5-3B-Instruct`, or `Neural Swift 1B`) with pre-response reasoning (`<thought>`), live streaming, and selective RAG linking across Avi's archive.
+  2. **Instant Archive Engine (Automatic Fallback):** Lightweight retrieval fallback across **108 sovereign knowledge entries** (8 Core Identity Pillars + 100 Archive Dossiers) whenever WebGPU is unavailable or disabled.
   3. **Optional Custom API (BYOK):** Settings modal allows connecting any OpenAI-compatible chat completions endpoint while still injecting Ask Avi's live RAG context and system prompt.
 - **Four Distinct Avi Voice Modes**
-  - `Standard Avi` — Evidence-first, incisive, first-principles clarity
-  - `Direct / Blunt` — Zero fluff, sharp institutional critique
-  - `Academic / UNIDIR` — Formal IHL, treaty frameworks & empirical citations
-  - `Mentor / Founder` — Candid practical guidance (Harrow → Buckingham → Cambridge → Bangkok)
+  - `Avi Standard` — Balanced first-person prose, British candour & clarity
+  - `Sharp & Blunt` — Direct, unsentimental, straight to incentives
+  - `Legal & Academic` — Cambridge / UNIDIR / IHL treaty precision
+  - `Candid & Reflective` — Harrow → Buckingham → Cambridge → Bangkok perspective
 - **Frontier Chatbot UX (Claude × Gemini Hybrid)**
   - Obsidian dark mode & warm editorial light theme (`data-theme="dark" | "light"`)
   - Collapsible conversation history sidebar with pinned threads, search filter, recency grouping, and Markdown export

@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
+import { buildAviSystemPrompt, ENGINE_OPTIONS } from '../src/data/persona';
 import { knowledgeIndex, KNOWLEDGE_META } from '../src/engine/rag';
 import { synthesizeInstantAviReply } from '../src/engine/instantSynthesizer';
 import { renderMarkdownToSafeHtml } from '../src/utils/markdown';
+import { splitThinkingAndAnswer } from '../src/utils/thinking';
 import {
+  DEFAULT_SETTINGS,
   deriveThreadTitle,
   exportThreadAsMarkdown,
   groupThreadsByRecency,
@@ -161,5 +164,42 @@ describe('Thread Storage & Export Helpers', () => {
     expect(md).toContain('### You');
     expect(md).toContain('### Ask Avi');
     expect(md).toContain('**Sources:**');
+  });
+});
+
+describe('Conversational Neural Prompting & Thinking Parser', () => {
+  it('defaults to WebGPU Neural Deep engine and keeps WebGPU Neural Qwen 3B available', () => {
+    expect(DEFAULT_SETTINGS.engineId).toBe('webgpu-deep');
+    expect(ENGINE_OPTIONS[0].id).toBe('webgpu-deep');
+    const qwen = ENGINE_OPTIONS.find((e) => e.id === 'webgpu-balanced');
+    expect(qwen?.mlcModelId).toBe('Qwen2.5-3B-Instruct-q4f16_1-MLC');
+  });
+
+  it('omits archive reference section when no dossiers are retrieved', () => {
+    const { sources } = knowledgeIndex.search('hi');
+    expect(sources.length).toBe(0);
+
+    const prompt = buildAviSystemPrompt('standard', sources);
+    expect(prompt).toContain('<thought>');
+    expect(prompt).not.toContain('OPTIONAL REFERENCE LINKS');
+  });
+
+  it('splits live streaming <thought> blocks and completed reasoning cleanly', () => {
+    const partial = splitThinkingAndAnswer('<thought>Testing their premise first.');
+    expect(partial.isThinking).toBe(true);
+    expect(partial.thinking).toBe('Testing their premise first.');
+    expect(partial.answer).toBe('');
+
+    const done = splitThinkingAndAnswer(
+      '<thought>They want a practical Python example, not an essay.</thought>\n\nHere is a clean pattern.'
+    );
+    expect(done.isThinking).toBe(false);
+    expect(done.thinking).toBe('They want a practical Python example, not an essay.');
+    expect(done.answer).toBe('Here is a clean pattern.');
+
+    const untagged = splitThinkingAndAnswer('Direct answer without tags.');
+    expect(untagged.isThinking).toBe(false);
+    expect(untagged.thinking).toBe('');
+    expect(untagged.answer).toBe('Direct answer without tags.');
   });
 });

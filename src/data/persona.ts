@@ -11,16 +11,16 @@ export const ENGINE_OPTIONS: EngineOption[] = [
     badge: '100% Free',
     providerKind: 'open-source',
     description:
-      'Default open-weights reasoning stack (GPT-OSS 120B, Qwen3 32B, Nemotron 3 Ultra 550B, Gemma 4 31B, or Cloudflare AI) with live open-web lookup — completely free.',
+      'Default open-weights reasoning stack (GPT-OSS 120B, Nemotron 3 Ultra 550B, Qwen3.8 27B, Gemma 4 31B, or Cloudflare AI) with live open-web lookup — completely free.',
   },
   {
     id: 'oss-fast',
-    name: 'Open-Source Chat 70B',
-    shortName: 'Llama 3.3 70B',
+    name: 'Open-Source Fast',
+    shortName: 'Qwen3.8 · GPT-OSS',
     badge: 'Fast · Free',
     providerKind: 'open-source',
     description:
-      'Ultra-fast open-weights dialogue (Llama 3.3 70B / Llama 4 Scout / Gemma 4 26B) with high free rate limits and zero cost.',
+      'Sub-second open-weights dialogue (Qwen3.8 27B, GPT-OSS 20B, Llama 4 Scout, or OpenRouter Free) with automatic failover and zero cost.',
   },
   {
     id: 'gemini-flash',

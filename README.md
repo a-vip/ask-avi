@@ -2,15 +2,15 @@
 
 > **Live Preview (GitHub Pages):** https://a-vip.github.io/ask-avi/
 
-**Ask Avi** is a frontier-style conversational AI web application modeled on Avi Perera's published research, international humanitarian law work, software systems, and philosophical essays—defaulting to **100% Free Open-Source Reasoning** (`GPT-OSS 120B`, `Qwen3 32B`, `Nemotron 3 Ultra 550B`, `Gemma 4 31B`, `Llama 3.3 70B`, or Cloudflare Workers AI) with optional **Google Gemini 3 & 4** models and live web grounding.
+**Ask Avi** is a frontier-style conversational AI web application modeled on Avi Perera's published research, international humanitarian law work, software systems, and philosophical essays—defaulting to **100% Free Open-Source Reasoning** (`GPT-OSS 120B`, `Qwen3.8 27B`, `Nemotron 3 Ultra 550B`, `Gemma 4 31B`, or Cloudflare Workers AI) with optional **Google Gemini 3 & 4** models and live web grounding.
 
 ---
 
 ## Key Capabilities
 
 - **100% Free Open-Source Default + Automatic Provider Cascade (`shared/geminiProxy.ts`)**
-  - **Open-Source Reasoning (Default):** Runs `openai/gpt-oss-120b` & `qwen/qwen3-32b` on **Groq** ($0 forever, up to 1,000 req/day, no card), `nvidia/nemotron-3-ultra-550b-a55b:free` & `google/gemma-4-31b-it:free` on **OpenRouter** ($0 forever, no card), or built-in **Cloudflare Workers AI** (`env.AI` — 10,000 free Neurons/day, zero external API keys needed!).
-  - **Open-Source Chat 70B:** Ultra-fast `Llama 3.3 70B` / `Llama 4 Scout` / `Gemma 4 26B` with automatic rate-limit failover across free providers.
+  - **Open-Source Reasoning (Default):** Runs `openai/gpt-oss-120b` & `qwen/qwen3.8-27b` on **Groq** ($0 forever, up to 1,000 req/day, no card), `nvidia/nemotron-3-ultra-550b-a55b:free` & `openrouter/free` on **OpenRouter** ($0 forever, no card), or built-in **Cloudflare Workers AI** (`env.AI` — 10,000 free Neurons/day, zero external API keys needed!).
+  - **Open-Source Fast:** Sub-second `Qwen3.8 27B`, `GPT-OSS 20B`, `Llama 4 Scout`, & `OpenRouter Free` with automatic rate-limit failover across free providers.
   - **Optional Google Gemini:** Keeps **Gemini 3 Flash** (`thinkingBudget: 8192`) & **Gemini 4 Hydrogen** (`thinkingBudget: 16384`) one click away in the model switcher.
   - **Live Internet Reference Grounding:** Automatically enriches open-source and Google replies with live Wikipedia + Crossref scholarly context (plus native Google Search when billed).
   - **Zero Browser Downloads or Fallback Snippets:** Responds directly in Avi's first-person voice to open-ended philosophical, technical, coding, and current-affairs questions while only citing Avi's archive links when genuinely relevant.

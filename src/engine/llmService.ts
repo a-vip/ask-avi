@@ -28,21 +28,21 @@ export class BackendNotConfiguredError extends Error {
 const keysWithoutNativeSearch = new Set<string>();
 
 const GROQ_MODELS_BY_ENGINE: Record<'oss-reasoning' | 'oss-fast', string[]> = {
-  'oss-reasoning': ['openai/gpt-oss-120b', 'qwen/qwen3-32b', 'llama-3.3-70b-versatile'],
-  'oss-fast': ['llama-3.3-70b-versatile', 'openai/gpt-oss-20b', 'llama-3.1-8b-instant'],
+  'oss-reasoning': ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b'],
+  'oss-fast': ['qwen/qwen3.8-27b', 'openai/gpt-oss-20b', 'openai/gpt-oss-120b'],
 };
 
 const OPENROUTER_MODELS_BY_ENGINE: Record<'oss-reasoning' | 'oss-fast', string[]> = {
   'oss-reasoning': [
     'nvidia/nemotron-3-ultra-550b-a55b:free',
+    'openrouter/free',
     'google/gemma-4-31b-it:free',
     'nvidia/nemotron-3.5-super-vl:free',
-    'openrouter/free',
   ],
   'oss-fast': [
     'nvidia/nemotron-3.5-lightning:free',
-    'google/gemma-4-26b-a4b-it:free',
     'openrouter/free',
+    'google/gemma-4-26b-a4b-it:free',
   ],
 };
 
@@ -297,12 +297,9 @@ class AviLLMService {
           temperature,
           max_tokens: 4096,
         };
-        if (
-          providerKind === 'groq' &&
-          (model.startsWith('openai/gpt-oss') || model.startsWith('qwen/qwen3'))
-        ) {
+        if (providerKind === 'groq' && model.startsWith('openai/gpt-oss')) {
           payload.reasoning_format = 'parsed';
-          payload.reasoning_effort = model.startsWith('openai/gpt-oss') ? 'high' : 'default';
+          payload.reasoning_effort = 'high';
         }
 
         const res = await fetch(endpoint, {

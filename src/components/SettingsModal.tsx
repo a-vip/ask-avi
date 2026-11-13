@@ -57,8 +57,8 @@ export function SettingsModal({
               <h3>Free Open-Source AI Providers (Default · No Card Required)</h3>
             </div>
             <p className="settings-desc">
-              Runs open-weights reasoning flagships (<code>GPT-OSS 120B</code>, <code>Qwen3 32B</code>,{' '}
-              <code>Nemotron 3 Ultra 550B</code>, <code>Gemma 4 31B</code>, <code>Llama 3.3 70B</code>) completely free. Connect one or both for automatic failover across rate limits, plus live open-web grounding.
+              Runs open-weights reasoning flagships (<code>GPT-OSS 120B</code>, <code>Qwen3.8 27B</code>,{' '}
+              <code>Nemotron 3 Ultra 550B</code>, <code>Gemma 4 31B</code>) completely free. Connect one or both for automatic failover across rate limits, plus live open-web grounding.
             </p>
 
             <div className="settings-form-grid">

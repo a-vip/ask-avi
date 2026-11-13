@@ -138,10 +138,31 @@ export const STARTER_PROMPTS: StarterPrompt[] = [
   },
   {
     id: 'sp-context',
-    category: 'Essays & Society',
+    category: 'AI Governance',
     title: 'The Trap of Context-Free Claims',
     prompt:
       'What do you mean by "linguistic superposition" in The Wonderful World of Context, and where do you see it happening today?',
+  },
+  {
+    id: 'sp-philosophy',
+    category: 'Philosophy & Life',
+    title: 'First Principles: Spinoza to Institutional Design',
+    prompt:
+      'What draws you to thinkers like Spinoza when looking at modern technology, power, and human agency?',
+  },
+  {
+    id: 'sp-code-review',
+    category: 'Systems & Code',
+    title: 'Architecture & Debugging Trade-offs',
+    prompt:
+      'How do you decide when to keep software architecture boring and verifiable versus building an autonomous agent workflow?',
+  },
+  {
+    id: 'sp-art36',
+    category: 'LAWS & IHL',
+    title: 'Article 36 Weapons Reviews in the AI Era',
+    prompt:
+      'Why do legacy Article 36 legal reviews struggle with continuously learning software, and how would you redesign compliance?',
   },
   {
     id: 'sp-advisory',

@@ -1,7 +1,7 @@
-import { Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { getTimeGreeting, STARTER_PROMPTS, VERIFIED_LINKS } from '../data/persona';
-import type { AttachedContext, VoiceStyle } from '../types/chat';
+import type { AttachedContext, EngineId, VoiceStyle } from '../types/chat';
 import { AviAvatar } from './AviAvatar';
 import { Composer } from './Composer';
 
@@ -11,6 +11,11 @@ interface WelcomeScreenProps {
   onSubmitPrompt: (overridePrompt?: string) => void;
   onStop: () => void;
   isStreaming: boolean;
+  engineId: EngineId;
+  webSearchEnabled: boolean;
+  onSelectEngine: (id: EngineId) => void;
+  onToggleWebSearch: () => void;
+  onOpenSettings: () => void;
   voiceStyle: VoiceStyle;
   onChangeVoiceStyle: (style: VoiceStyle) => void;
   attachedContext: AttachedContext | null;
@@ -27,6 +32,11 @@ export function WelcomeScreen({
   onSubmitPrompt,
   onStop,
   isStreaming,
+  engineId,
+  webSearchEnabled,
+  onSelectEngine,
+  onToggleWebSearch,
+  onOpenSettings,
   voiceStyle,
   onChangeVoiceStyle,
   attachedContext,
@@ -34,6 +44,7 @@ export function WelcomeScreen({
   onOpenDossierPicker,
   inputRef,
 }: WelcomeScreenProps) {
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const greeting = useMemo(() => getTimeGreeting(), []);
 
@@ -47,11 +58,7 @@ export function WelcomeScreen({
       <div className="welcome-inner">
         <div className="welcome-hero">
           <div className="welcome-badge-row">
-            <AviAvatar size={40} className="welcome-avatar" />
-            <span className="welcome-eyebrow">
-              <Sparkles size={13} />
-              <span>AI Persona · Avi Perera</span>
-            </span>
+            <AviAvatar size={42} className="welcome-avatar" />
           </div>
 
           <h1 className="welcome-heading">
@@ -65,6 +72,11 @@ export function WelcomeScreen({
           onSubmit={() => onSubmitPrompt()}
           onStop={onStop}
           isStreaming={isStreaming}
+          engineId={engineId}
+          webSearchEnabled={webSearchEnabled}
+          onSelectEngine={onSelectEngine}
+          onToggleWebSearch={onToggleWebSearch}
+          onOpenSettings={onOpenSettings}
           voiceStyle={voiceStyle}
           onChangeVoiceStyle={onChangeVoiceStyle}
           attachedContext={attachedContext}
@@ -74,51 +86,68 @@ export function WelcomeScreen({
           inputRef={inputRef}
         />
 
-        <div className="starter-section">
-          <div className="starter-filters" role="tablist" aria-label="Prompt categories">
-            {PROMPT_FILTERS.map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                role="tab"
-                aria-selected={selectedCategory === cat}
-                className={`filter-pill ${selectedCategory === cat ? 'active' : ''}`}
-                onClick={() => setSelectedCategory(cat)}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-
-          <div className="starter-grid">
-            {visiblePrompts.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className="starter-card"
-                onClick={() => onSubmitPrompt(item.prompt)}
-              >
-                <span className="starter-cat">{item.category}</span>
-                <strong className="starter-title">{item.title}</strong>
-                <span className="starter-prompt">{item.prompt}</span>
-              </button>
-            ))}
-          </div>
+        <div className="suggestions-toggle-row">
+          <button
+            type="button"
+            className={`suggestions-toggle-btn ${suggestionsOpen ? 'active' : ''}`}
+            onClick={() => setSuggestionsOpen((p) => !p)}
+            aria-expanded={suggestionsOpen}
+          >
+            <Sparkles size={13} />
+            <span>{suggestionsOpen ? 'Hide suggestions' : 'Show suggestions'}</span>
+            {suggestionsOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          </button>
         </div>
 
-        <div className="welcome-links-bar">
-          {VERIFIED_LINKS.map((lnk) => (
-            <a
-              key={lnk.url}
-              href={lnk.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="verified-link-chip"
-            >
-              {lnk.label} ↗
-            </a>
-          ))}
-        </div>
+        {suggestionsOpen && (
+          <div className="starter-disclosure">
+            <div className="starter-section">
+              <div className="starter-filters" role="tablist" aria-label="Prompt categories">
+                {PROMPT_FILTERS.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    role="tab"
+                    aria-selected={selectedCategory === cat}
+                    className={`filter-pill ${selectedCategory === cat ? 'active' : ''}`}
+                    onClick={() => setSelectedCategory(cat)}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+
+              <div className="starter-grid">
+                {visiblePrompts.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="starter-card"
+                    onClick={() => onSubmitPrompt(item.prompt)}
+                  >
+                    <span className="starter-cat">{item.category}</span>
+                    <strong className="starter-title">{item.title}</strong>
+                    <span className="starter-prompt">{item.prompt}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="welcome-links-bar">
+              {VERIFIED_LINKS.map((lnk) => (
+                <a
+                  key={lnk.url}
+                  href={lnk.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="verified-link-chip"
+                >
+                  {lnk.label} ↗
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

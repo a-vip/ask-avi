@@ -1,20 +1,27 @@
 import {
   BookOpen,
+  ChevronDown,
+  ChevronRight,
   ExternalLink,
+  HelpCircle,
+  Info,
+  LogIn,
+  LogOut,
   MessageSquare,
+  Moon,
   PanelLeftClose,
   Pencil,
   Pin,
   Plus,
   Search,
   Settings,
+  Sun,
   Trash2,
   X,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
-import { ENGINE_OPTIONS } from '../data/persona';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { KNOWLEDGE_META } from '../engine/rag';
-import type { ChatThread, EngineId } from '../types/chat';
+import type { ChatThread, ThemeMode, UserProfile } from '../types/chat';
 import { groupThreadsByRecency } from '../utils/storage';
 import { AviAvatar } from './AviAvatar';
 
@@ -23,8 +30,8 @@ interface SidebarProps {
   isMobile: boolean;
   threads: ChatThread[];
   activeThreadId: string | null;
-  activeEngineId: EngineId;
-  backendConnected: boolean;
+  theme: ThemeMode;
+  userProfile: UserProfile | null;
   onCloseMobile: () => void;
   onToggleCollapse: () => void;
   onNewChat: () => void;
@@ -34,6 +41,11 @@ interface SidebarProps {
   onDeleteThread: (id: string) => void;
   onOpenKnowledge: () => void;
   onOpenSettings: () => void;
+  onToggleTheme: () => void;
+  onOpenHelp: () => void;
+  onOpenAbout: () => void;
+  onOpenSignIn: () => void;
+  onSignOut: () => void;
 }
 
 export function Sidebar({
@@ -41,8 +53,8 @@ export function Sidebar({
   isMobile,
   threads,
   activeThreadId,
-  activeEngineId,
-  backendConnected,
+  theme,
+  userProfile,
   onCloseMobile,
   onToggleCollapse,
   onNewChat,
@@ -52,10 +64,29 @@ export function Sidebar({
   onDeleteThread,
   onOpenKnowledge,
   onOpenSettings,
+  onToggleTheme,
+  onOpenHelp,
+  onOpenAbout,
+  onOpenSignIn,
+  onSignOut,
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [learnExpanded, setLearnExpanded] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(e.target as Node)) {
+        setAccountOpen(false);
+        setLearnExpanded(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -68,11 +99,6 @@ export function Sidebar({
   }, [threads, searchQuery]);
 
   const groups = useMemo(() => groupThreadsByRecency(filtered), [filtered]);
-  const activeOption = ENGINE_OPTIONS.find((o) => o.id === activeEngineId) ?? ENGINE_OPTIONS[0];
-
-  const engineStatusLabel = backendConnected
-    ? `${activeOption.shortName} · Live Web`
-    : 'Connect Free AI / Proxy';
 
   if (!isOpen) return null;
 
@@ -81,6 +107,9 @@ export function Sidebar({
     if (trimmed) onRenameThread(id, trimmed);
     setEditingId(null);
   };
+
+  const displayName = userProfile?.name ?? 'Guest';
+  const avatarInitial = displayName.charAt(0).toUpperCase();
 
   return (
     <>
@@ -247,37 +276,172 @@ export function Sidebar({
           )}
         </div>
 
-        <div className="sidebar-footer">
+        <div className="sidebar-footer" ref={accountMenuRef}>
+          {accountOpen && (
+            <div className="account-popover-menu" role="menu" aria-label="Account and workspace menu">
+              <div className="account-popover-header">
+                {userProfile?.email
+                  ? userProfile.email
+                  : userProfile
+                    ? `${userProfile.name} · Local workspace`
+                    : 'Guest · Free'}
+              </div>
+
+              <button
+                type="button"
+                role="menuitem"
+                className="account-menu-item"
+                onClick={() => {
+                  setAccountOpen(false);
+                  setLearnExpanded(false);
+                  onOpenSettings();
+                  if (isMobile) onCloseMobile();
+                }}
+              >
+                <Settings size={15} className="account-menu-icon" />
+                <span className="account-menu-label">Settings</span>
+                <kbd className="account-menu-kbd">Ctrl+Shift+,</kbd>
+              </button>
+
+              <button
+                type="button"
+                role="menuitem"
+                className="account-menu-item"
+                onClick={() => onToggleTheme()}
+              >
+                {theme === 'dark' ? (
+                  <Sun size={15} className="account-menu-icon" />
+                ) : (
+                  <Moon size={15} className="account-menu-icon" />
+                )}
+                <span className="account-menu-label">Appearance</span>
+                <span className="account-menu-meta">{theme === 'dark' ? 'Dark' : 'Light'}</span>
+              </button>
+
+              <button
+                type="button"
+                role="menuitem"
+                className="account-menu-item"
+                onClick={() => {
+                  setAccountOpen(false);
+                  setLearnExpanded(false);
+                  onOpenHelp();
+                  if (isMobile) onCloseMobile();
+                }}
+              >
+                <HelpCircle size={15} className="account-menu-icon" />
+                <span className="account-menu-label">Get help</span>
+              </button>
+
+              <div className="account-menu-divider" />
+
+              <button
+                type="button"
+                role="menuitem"
+                className="account-menu-item"
+                aria-expanded={learnExpanded}
+                onClick={() => setLearnExpanded((p) => !p)}
+              >
+                <Info size={15} className="account-menu-icon" />
+                <span className="account-menu-label">Learn more</span>
+                <ChevronRight size={14} className={`account-menu-chevron ${learnExpanded ? 'open' : ''}`} />
+              </button>
+
+              {learnExpanded && (
+                <div className="account-submenu">
+                  <button
+                    type="button"
+                    className="account-submenu-item"
+                    onClick={() => {
+                      setAccountOpen(false);
+                      setLearnExpanded(false);
+                      onOpenAbout();
+                      if (isMobile) onCloseMobile();
+                    }}
+                  >
+                    <span>About Ask Avi</span>
+                  </button>
+                  <a
+                    href="https://aviperera.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="account-submenu-item"
+                  >
+                    <span>aviperera.com</span>
+                    <ExternalLink size={12} />
+                  </a>
+                  <a
+                    href="https://aviperera.com/stance/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="account-submenu-item"
+                  >
+                    <span>Stance on AI</span>
+                    <ExternalLink size={12} />
+                  </a>
+                  <a
+                    href="https://aviperera.com/research/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="account-submenu-item"
+                  >
+                    <span>Research &amp; DOIs</span>
+                    <ExternalLink size={12} />
+                  </a>
+                </div>
+              )}
+
+              <div className="account-menu-divider" />
+
+              {userProfile ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="account-menu-item"
+                  onClick={() => {
+                    setAccountOpen(false);
+                    setLearnExpanded(false);
+                    onSignOut();
+                  }}
+                >
+                  <LogOut size={15} className="account-menu-icon" />
+                  <span className="account-menu-label">Sign out</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="account-menu-item"
+                  onClick={() => {
+                    setAccountOpen(false);
+                    setLearnExpanded(false);
+                    onOpenSignIn();
+                    if (isMobile) onCloseMobile();
+                  }}
+                >
+                  <LogIn size={15} className="account-menu-icon" />
+                  <span className="account-menu-label">Sign in</span>
+                </button>
+              )}
+            </div>
+          )}
+
           <button
             type="button"
-            className="engine-status-pill clickable"
-            onClick={onOpenSettings}
-            title={engineStatusLabel}
+            className={`account-trigger-btn ${accountOpen ? 'open' : ''}`}
+            onClick={() => setAccountOpen((p) => !p)}
+            aria-expanded={accountOpen}
+            aria-haspopup="menu"
           >
-            <span className={`status-dot ${backendConnected ? 'ready' : 'warn'}`} />
-            <span className="status-label">{engineStatusLabel}</span>
+            <span className="account-avatar-badge" aria-hidden="true">
+              {avatarInitial}
+            </span>
+            <span className="account-trigger-info">
+              <span className="account-trigger-name">{displayName}</span>
+              <span className="account-trigger-plan">Free</span>
+            </span>
+            <ChevronDown size={14} className={`account-trigger-chevron ${accountOpen ? 'open' : ''}`} />
           </button>
-
-          <div className="sidebar-footer-links">
-            <button
-              type="button"
-              className="footer-link-btn"
-              onClick={onOpenSettings}
-            >
-              <Settings size={15} />
-              <span>Settings</span>
-            </button>
-            <a
-              href="https://aviperera.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="footer-ext-btn"
-              title="Visit aviperera.com"
-              aria-label="Visit aviperera.com"
-            >
-              <ExternalLink size={15} />
-            </a>
-          </div>
         </div>
       </aside>
     </>

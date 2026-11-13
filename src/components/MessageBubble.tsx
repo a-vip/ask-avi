@@ -252,9 +252,6 @@ export function MessageBubble({
       <div className="msg-assistant-body">
         <div className="msg-assistant-header">
           <span className="msg-speaker-name">Ask Avi</span>
-          {message.modelLabel && (
-            <span className="msg-model-badge">{message.modelLabel}</span>
-          )}
         </div>
 
         {/* Antigravity / Claude / Gemini Reasoning Timeline */}

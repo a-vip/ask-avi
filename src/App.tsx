@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AccountInfoModal, SignInModal } from './components/AccountDialogs';
 import { Composer } from './components/Composer';
 import { KnowledgeDrawer } from './components/KnowledgeDrawer';
 import { MessageBubble } from './components/MessageBubble';
@@ -6,11 +7,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { WelcomeScreen } from './components/WelcomeScreen';
-import {
-  BackendNotConfiguredError,
-  llmService,
-  resolveEffectiveProxyUrl,
-} from './engine/llmService';
+import { BackendNotConfiguredError, llmService } from './engine/llmService';
 import type {
   AppSettings,
   AttachedContext,
@@ -19,6 +16,7 @@ import type {
   EngineId,
   KnowledgeEntry,
   RetrievedSource,
+  UserProfile,
   VoiceStyle,
 } from './types/chat';
 import {
@@ -27,9 +25,11 @@ import {
   exportThreadAsMarkdown,
   loadSettings,
   loadThreads,
+  loadUserProfile,
   postParentBridgeEvent,
   saveSettings,
   saveThreads,
+  saveUserProfile,
 } from './utils/storage';
 
 function makeId(prefix: string): string {
@@ -62,25 +62,15 @@ export default function App() {
   const [drawerSources, setDrawerSources] = useState<RetrievedSource[]>([]);
   const [drawerFocusIdx, setDrawerFocusIdx] = useState<number | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(() => loadUserProfile());
+  const [signInOpen, setSignInOpen] = useState(false);
+  const [accountInfoMode, setAccountInfoMode] = useState<'help' | 'about' | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
-
-  const backendConnected = useMemo(() => {
-    const proxyReady = Boolean(resolveEffectiveProxyUrl(settings.proxyUrl));
-    if (settings.engineId === 'custom-api') {
-      return Boolean(settings.customApi.endpointUrl.trim() && settings.customApi.modelName.trim());
-    }
-    if (settings.engineId === 'gemini-flash' || settings.engineId === 'gemini-pro') {
-      return Boolean(settings.geminiApiKey.trim() || proxyReady);
-    }
-    return Boolean(
-      settings.groqApiKey.trim() || settings.openRouterApiKey.trim() || proxyReady
-    );
-  }, [settings]);
 
   const activeThread = useMemo(() => {
     if (isTemporaryChat) return tempThread;
@@ -122,12 +112,23 @@ export default function App() {
     };
   }, []);
 
-  // Keyboard shortcuts (/ to focus composer, Ctrl/Cmd+Shift+O for New Chat)
+  // Keyboard shortcuts (/ to focus composer, Ctrl/Cmd+Shift+O for New Chat, Ctrl/Cmd+Shift+, for Settings)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'o') {
         e.preventDefault();
         handleNewChat();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === ',' || e.code === 'Comma')) {
+        e.preventDefault();
+        setSettingsOpen(true);
+        return;
+      }
+      if (e.key === 'Escape') {
+        setSettingsOpen(false);
+        setSignInOpen(false);
+        setAccountInfoMode(null);
         return;
       }
       if (
@@ -142,6 +143,10 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
+
+  useEffect(() => {
+    saveUserProfile(userProfile);
+  }, [userProfile]);
 
   // Track whether user is near bottom during streaming
   const handleScrollContainer = () => {
@@ -523,6 +528,21 @@ export default function App() {
 
   const hasMessages = Boolean(activeThread && activeThread.messages.length > 0);
 
+  const handleSelectEngine = useCallback((engineId: EngineId) => {
+    setSettings((prev) => ({ ...prev, engineId }));
+  }, []);
+
+  const handleToggleWebSearch = useCallback(() => {
+    setSettings((prev) => ({ ...prev, webSearchEnabled: !prev.webSearchEnabled }));
+  }, []);
+
+  const handleToggleTheme = useCallback(() => {
+    setSettings((prev) => ({
+      ...prev,
+      theme: prev.theme === 'dark' ? 'light' : 'dark',
+    }));
+  }, []);
+
   return (
     <div className="app-shell">
       <Sidebar
@@ -530,8 +550,8 @@ export default function App() {
         isMobile={isMobile}
         threads={threads}
         activeThreadId={activeThread?.id ?? null}
-        activeEngineId={settings.engineId}
-        backendConnected={backendConnected}
+        theme={settings.theme}
+        userProfile={userProfile}
         onCloseMobile={() => setSidebarOpen(false)}
         onToggleCollapse={() => setSidebarOpen(false)}
         onNewChat={handleNewChat}
@@ -558,28 +578,22 @@ export default function App() {
           setKnowledgeOpen(true);
         }}
         onOpenSettings={() => setSettingsOpen(true)}
+        onToggleTheme={handleToggleTheme}
+        onOpenHelp={() => setAccountInfoMode('help')}
+        onOpenAbout={() => setAccountInfoMode('about')}
+        onOpenSignIn={() => setSignInOpen(true)}
+        onSignOut={() => setUserProfile(null)}
       />
 
       <div className="main-pane">
         <TopBar
           sidebarOpen={sidebarOpen}
           theme={settings.theme}
-          engineId={settings.engineId}
-          webSearchEnabled={settings.webSearchEnabled}
           isTemporaryChat={isTemporaryChat}
           canExport={hasMessages}
           knowledgeOpen={knowledgeOpen}
           onOpenSidebar={() => setSidebarOpen(true)}
-          onSelectEngine={(engineId) => setSettings((prev) => ({ ...prev, engineId }))}
-          onToggleWebSearch={() =>
-            setSettings((prev) => ({ ...prev, webSearchEnabled: !prev.webSearchEnabled }))
-          }
-          onToggleTheme={() =>
-            setSettings((prev) => ({
-              ...prev,
-              theme: prev.theme === 'dark' ? 'light' : 'dark',
-            }))
-          }
+          onToggleTheme={handleToggleTheme}
           onToggleTemporary={() => {
             setIsTemporaryChat((prev) => {
               const next = !prev;
@@ -592,7 +606,6 @@ export default function App() {
             setDrawerTab(drawerSources.length > 0 ? 'cited' : 'archive');
             setKnowledgeOpen((p) => !p);
           }}
-          onOpenSettings={() => setSettingsOpen(true)}
         />
 
         <main
@@ -607,6 +620,11 @@ export default function App() {
               onSubmitPrompt={handleSubmitPrompt}
               onStop={handleStop}
               isStreaming={isStreaming}
+              engineId={settings.engineId}
+              webSearchEnabled={settings.webSearchEnabled}
+              onSelectEngine={handleSelectEngine}
+              onToggleWebSearch={handleToggleWebSearch}
+              onOpenSettings={() => setSettingsOpen(true)}
               voiceStyle={settings.voiceStyle}
               onChangeVoiceStyle={(voiceStyle: VoiceStyle) =>
                 setSettings((prev) => ({ ...prev, voiceStyle }))
@@ -651,6 +669,11 @@ export default function App() {
               onSubmit={() => handleSubmitPrompt()}
               onStop={handleStop}
               isStreaming={isStreaming}
+              engineId={settings.engineId}
+              webSearchEnabled={settings.webSearchEnabled}
+              onSelectEngine={handleSelectEngine}
+              onToggleWebSearch={handleToggleWebSearch}
+              onOpenSettings={() => setSettingsOpen(true)}
               voiceStyle={settings.voiceStyle}
               onChangeVoiceStyle={(voiceStyle: VoiceStyle) =>
                 setSettings((prev) => ({ ...prev, voiceStyle }))
@@ -682,6 +705,24 @@ export default function App() {
         settings={settings}
         onClose={() => setSettingsOpen(false)}
         onUpdateSettings={setSettings}
+      />
+
+      <SignInModal
+        isOpen={signInOpen}
+        currentProfile={userProfile}
+        onClose={() => setSignInOpen(false)}
+        onSignIn={setUserProfile}
+        onSignOut={() => setUserProfile(null)}
+      />
+
+      <AccountInfoModal
+        mode={accountInfoMode}
+        onClose={() => setAccountInfoMode(null)}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenDossiers={() => {
+          setDrawerTab('archive');
+          setKnowledgeOpen(true);
+        }}
       />
     </div>
   );

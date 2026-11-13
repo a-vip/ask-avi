@@ -1,9 +1,10 @@
-import type { AppSettings, ChatThread, ThemeMode } from '../types/chat';
+import type { AppSettings, ChatThread, ThemeMode, UserProfile } from '../types/chat';
 
 const THREADS_KEY = 'ask_avi_threads_v1';
 const SETTINGS_KEY = 'ask_avi_settings_v4';
 const LEGACY_SETTINGS_KEY = 'ask_avi_settings_v3';
 const THEME_KEY = 'ask_avi_theme';
+const PROFILE_KEY = 'ask_avi_profile_v1';
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
@@ -172,5 +173,34 @@ export function postParentBridgeEvent(type: string, payload?: unknown): void {
     }
   } catch {
     // Ignore cross-origin postMessage restrictions
+  }
+}
+
+export function loadUserProfile(): UserProfile | null {
+  try {
+    const raw = localStorage.getItem(PROFILE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<UserProfile>;
+    const name = typeof parsed.name === 'string' ? parsed.name.trim() : '';
+    if (!name) return null;
+    return {
+      name,
+      email: typeof parsed.email === 'string' && parsed.email.trim() ? parsed.email.trim() : undefined,
+      signedInAt: typeof parsed.signedInAt === 'number' ? parsed.signedInAt : Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function saveUserProfile(profile: UserProfile | null): void {
+  try {
+    if (!profile) {
+      localStorage.removeItem(PROFILE_KEY);
+    } else {
+      localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    }
+  } catch {
+    // Ignore storage failures
   }
 }

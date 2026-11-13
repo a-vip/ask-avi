@@ -17,6 +17,8 @@ import {
   deriveThreadTitle,
   exportThreadAsMarkdown,
   groupThreadsByRecency,
+  loadUserProfile,
+  saveUserProfile,
 } from '../src/utils/storage';
 import type { ChatThread } from '../src/types/chat';
 
@@ -260,5 +262,13 @@ describe('Thread Storage & Export Helpers', () => {
     const md = exportThreadAsMarkdown(thread);
     expect(md).toContain('# SovDash Briefing');
     expect(md).toContain('### Ask Avi');
+  });
+
+  it('persists and clears local user profile for bottom-left Sign in / Sign out', () => {
+    saveUserProfile({ name: 'Avi Perera', email: 'avi@example.com', signedInAt: 1234 });
+    expect(loadUserProfile()?.name).toBe('Avi Perera');
+    expect(loadUserProfile()?.email).toBe('avi@example.com');
+    saveUserProfile(null);
+    expect(loadUserProfile()).toBeNull();
   });
 });

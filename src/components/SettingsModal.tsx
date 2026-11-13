@@ -156,7 +156,7 @@ export function SettingsModal({
               <h3>Google Gemini (Optional Model Switcher Option)</h3>
             </div>
             <p className="settings-desc">
-              Powers the optional <code>Gemini 3 Flash</code> &amp; <code>Gemini 4 Hydrogen</code> entries in the top model dropdown.
+              Powers the optional <code>Gemini 3 Flash</code> &amp; <code>Gemini 4 Hydrogen</code> entries in the bottom-right model switcher.
             </p>
             <div className="settings-form-grid">
               <label>

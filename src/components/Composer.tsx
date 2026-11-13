@@ -4,15 +4,18 @@ import {
   Check,
   ChevronDown,
   FileText,
+  Globe,
   Mic,
   MicOff,
   Paperclip,
+  Settings,
+  Sparkles,
   Square,
   X,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { VOICE_STYLES } from '../data/persona';
-import type { AttachedContext, VoiceStyle } from '../types/chat';
+import { ENGINE_OPTIONS, VOICE_STYLES } from '../data/persona';
+import type { AttachedContext, EngineId, VoiceStyle } from '../types/chat';
 
 interface ComposerProps {
   value: string;
@@ -20,6 +23,11 @@ interface ComposerProps {
   onSubmit: () => void;
   onStop: () => void;
   isStreaming: boolean;
+  engineId: EngineId;
+  webSearchEnabled: boolean;
+  onSelectEngine: (id: EngineId) => void;
+  onToggleWebSearch: () => void;
+  onOpenSettings: () => void;
   voiceStyle: VoiceStyle;
   onChangeVoiceStyle: (style: VoiceStyle) => void;
   attachedContext: AttachedContext | null;
@@ -56,6 +64,11 @@ export function Composer({
   onSubmit,
   onStop,
   isStreaming,
+  engineId,
+  webSearchEnabled,
+  onSelectEngine,
+  onToggleWebSearch,
+  onOpenSettings,
   voiceStyle,
   onChangeVoiceStyle,
   attachedContext,
@@ -69,9 +82,11 @@ export function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const styleMenuRef = useRef<HTMLDivElement>(null);
   const attachMenuRef = useRef<HTMLDivElement>(null);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
 
   const [styleOpen, setStyleOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [modelOpen, setModelOpen] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 
@@ -80,6 +95,7 @@ export function Composer({
     ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
 
   const activeStyle = VOICE_STYLES.find((s) => s.id === voiceStyle) ?? VOICE_STYLES[0];
+  const activeEngine = ENGINE_OPTIONS.find((o) => o.id === engineId) ?? ENGINE_OPTIONS[0];
 
   // Auto-resize textarea smoothly
   useEffect(() => {
@@ -96,6 +112,9 @@ export function Composer({
       }
       if (attachMenuRef.current && !attachMenuRef.current.contains(e.target as Node)) {
         setAttachOpen(false);
+      }
+      if (modelMenuRef.current && !modelMenuRef.current.contains(e.target as Node)) {
+        setModelOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -186,7 +205,7 @@ export function Composer({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask Avi anything…"
+          placeholder="How can I help you today?"
           aria-label="Message Ask Avi"
           className="composer-input"
         />
@@ -197,7 +216,11 @@ export function Composer({
               <button
                 type="button"
                 className="tool-chip-btn"
-                onClick={() => setAttachOpen((p) => !p)}
+                onClick={() => {
+                  setStyleOpen(false);
+                  setModelOpen(false);
+                  setAttachOpen((p) => !p);
+                }}
                 title="Attach dossier or text file"
               >
                 <Paperclip size={15} />
@@ -240,7 +263,11 @@ export function Composer({
               <button
                 type="button"
                 className="tool-chip-btn"
-                onClick={() => setStyleOpen((p) => !p)}
+                onClick={() => {
+                  setAttachOpen(false);
+                  setModelOpen(false);
+                  setStyleOpen((p) => !p);
+                }}
                 title="Adjust Avi's response voice"
               >
                 <span>{activeStyle.label}</span>
@@ -270,6 +297,91 @@ export function Composer({
           </div>
 
           <div className="composer-tools-right">
+            <div className="popover-anchor" ref={modelMenuRef}>
+              <button
+                type="button"
+                className="composer-model-btn"
+                onClick={() => {
+                  setAttachOpen(false);
+                  setStyleOpen(false);
+                  setModelOpen((p) => !p);
+                }}
+                aria-expanded={modelOpen}
+                aria-haspopup="listbox"
+                title="Switch reasoning model"
+              >
+                <span className="composer-model-name">{activeEngine.shortName}</span>
+                <ChevronDown size={13} className={`chevron ${modelOpen ? 'open' : ''}`} />
+              </button>
+
+              {modelOpen && (
+                <div
+                  className="model-dropdown composer-model-dropdown"
+                  role="listbox"
+                  aria-label="Choose model"
+                >
+                  <div className="dropdown-head">
+                    <span>Model</span>
+                    <button
+                      type="button"
+                      className={`web-toggle-chip ${webSearchEnabled ? 'active' : ''}`}
+                      onClick={onToggleWebSearch}
+                      title="Toggle live internet search & reference grounding"
+                    >
+                      <Globe size={11} />
+                      <span>{webSearchEnabled ? 'Web Search On' : 'Web Search Off'}</span>
+                    </button>
+                  </div>
+
+                  {ENGINE_OPTIONS.map((opt) => {
+                    const selected = opt.id === engineId;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        className={`model-option ${selected ? 'selected' : ''}`}
+                        onClick={() => {
+                          onSelectEngine(opt.id);
+                          setModelOpen(false);
+                          if (opt.id === 'custom-api') {
+                            onOpenSettings();
+                          }
+                        }}
+                      >
+                        <div className="model-option-top">
+                          <div className="model-option-title">
+                            <Sparkles size={14} />
+                            <span>{opt.name}</span>
+                          </div>
+                          <div className="model-option-badges">
+                            <span className="size-badge">{opt.badge}</span>
+                            {selected && <Check size={14} className="check-icon" />}
+                          </div>
+                        </div>
+                        <p className="model-option-desc">{opt.description}</p>
+                      </button>
+                    );
+                  })}
+
+                  <div className="dropdown-footer">
+                    <button
+                      type="button"
+                      className="dropdown-settings-link"
+                      onClick={() => {
+                        setModelOpen(false);
+                        onOpenSettings();
+                      }}
+                    >
+                      <Settings size={13} />
+                      <span>API Key &amp; Proxy Settings</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {speechSupported && (
               <button
                 type="button"

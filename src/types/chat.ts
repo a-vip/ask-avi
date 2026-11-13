@@ -111,6 +111,12 @@ export interface CustomApiConfig {
   modelName: string;
 }
 
+export interface UserProfile {
+  name: string;
+  email?: string;
+  signedInAt: number;
+}
+
 export interface AppSettings {
   theme: ThemeMode;
   engineId: EngineId;

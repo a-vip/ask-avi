@@ -46,11 +46,13 @@ describe('Knowledge Index & RAG Retrieval', () => {
   });
 });
 
-describe('Gemini 2.5 Frontier Config, SSE Parser & Proxy Resolution', () => {
-  it('defaults to Gemini 2.5 Flash with thinking & live web search enabled (no WebGPU/Instant Archive)', () => {
+describe('Gemini 3 & 4 Frontier Config, SSE Parser & Proxy Resolution', () => {
+  it('defaults to Gemini 3 Flash with thinking & live web search enabled (no WebGPU/Instant Archive)', () => {
     expect(DEFAULT_SETTINGS.engineId).toBe('gemini-flash');
     expect(DEFAULT_SETTINGS.webSearchEnabled).toBe(true);
     expect(ENGINE_OPTIONS.map((e) => e.id)).toEqual(['gemini-flash', 'gemini-pro', 'custom-api']);
+    expect(ENGINE_OPTIONS[0].geminiModelId).toBe('gemini-3-flash-preview');
+    expect(ENGINE_OPTIONS[1].geminiModelId).toBe('gemini-4-hydrogen');
     expect(ENGINE_OPTIONS[0].thinkingBudget).toBe(8192);
     expect(ENGINE_OPTIONS[1].thinkingBudget).toBe(16384);
   });
@@ -111,6 +113,18 @@ describe('Gemini 2.5 Frontier Config, SSE Parser & Proxy Resolution', () => {
     const prompt = buildAviSystemPrompt('standard', []);
     expect(prompt).toContain('Ask Avi');
     expect(prompt).not.toContain('RELEVANT ARCHIVE LINKS');
+  });
+
+  it('includes optional open-web reference snippets when native search quota falls back', () => {
+    const prompt = buildAviSystemPrompt(
+      'standard',
+      [],
+      undefined,
+      false,
+      'LIVE OPEN-WEB REFERENCE SNIPPETS:\n- UN CCW (https://en.wikipedia.org/wiki/Convention_on_Certain_Conventional_Weapons)'
+    );
+    expect(prompt).toContain('LIVE OPEN-WEB REFERENCE SNIPPETS');
+    expect(prompt).toContain('en.wikipedia.org');
   });
 });
 

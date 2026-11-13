@@ -341,7 +341,7 @@ export function MessageBubble({
             <p className="setup-prompt-text">{message.content}</p>
             <button type="button" className="btn-primary-sm" onClick={onOpenSettings}>
               <KeyRound size={14} />
-              <span>Connect Gemini 2.5 API / Proxy</span>
+              <span>Connect Gemini API / Proxy</span>
             </button>
           </div>
         ) : message.isStreaming && !message.content && !hasReasoningBlock ? (

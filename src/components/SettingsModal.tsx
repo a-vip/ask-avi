@@ -54,16 +54,16 @@ export function SettingsModal({
           <section className="settings-section">
             <div className="settings-section-title">
               <Sparkles size={16} />
-              <h3>Gemini 2.5 Thinking &amp; Live Web Search</h3>
+              <h3>Gemini 3 &amp; 4 Thinking + Live Web Search</h3>
             </div>
             <p className="settings-desc">
-              Powers open-ended philosophical, technical, and current-affairs conversations in Avi&apos;s voice using extended reasoning and Google Search grounding.
+              Powers open-ended philosophical, technical, and current-affairs conversations in Avi&apos;s voice using extended reasoning and live web grounding.
             </p>
 
             <div className="settings-form-grid">
               <label>
                 <span>
-                  Gemini API Key (saved only in your browser — get a free key at{' '}
+                  Gemini API Key (saved only in your browser — get a key at{' '}
                   <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">
                     Google AI Studio
                   </a>
@@ -72,7 +72,7 @@ export function SettingsModal({
                 <input
                   type="password"
                   value={settings.geminiApiKey}
-                  placeholder="AIza..."
+                  placeholder="AQ... or AIza..."
                   onChange={(e) =>
                     onUpdateSettings({
                       ...settings,

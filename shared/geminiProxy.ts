@@ -9,7 +9,30 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'https://a-vip.github.io',
 ];
 
-const ALLOWED_MODELS = new Set(['gemini-2.5-flash', 'gemini-2.5-pro']);
+const DEFAULT_FLASH_MODEL = 'gemini-3-flash-preview';
+
+const ALLOWED_MODELS = new Set([
+  'gemini-3-flash-preview',
+  'gemini-3.8-flash',
+  'gemini-3.5-flash',
+  'gemini-3.6-flash',
+  'gemini-3.7-flash',
+  'gemini-flash-latest',
+  'gemini-flash-lite-latest',
+  'gemini-4-hydrogen',
+  'gemini-3.1-pro-preview',
+  'gemini-pro-latest',
+  'gemini-4-argon',
+  'gemini-4-carbon',
+]);
+
+const DEEP_MODELS = new Set(['gemini-4-hydrogen', 'gemini-3.1-pro-preview', 'gemini-pro-latest']);
+const PROXY_FALLBACK_ORDER = [
+  'gemini-3-flash-preview',
+  'gemini-3.5-flash',
+  'gemini-4-hydrogen',
+  'gemini-flash-lite-latest',
+];
 
 export function resolveCorsHeaders(request: Request, extraOrigins?: string): Record<string, string> {
   const origin = request.headers.get('Origin') ?? '';
@@ -87,8 +110,8 @@ export async function handleGeminiProxyRequest(
     });
   }
 
-  const requestedModel = body.model ?? 'gemini-2.5-flash';
-  const model = ALLOWED_MODELS.has(requestedModel) ? requestedModel : 'gemini-2.5-flash';
+  const requestedModel = body.model ?? DEFAULT_FLASH_MODEL;
+  const primaryModel = ALLOWED_MODELS.has(requestedModel) ? requestedModel : DEFAULT_FLASH_MODEL;
 
   if (!Array.isArray(body.contents) || body.contents.length === 0) {
     return new Response(JSON.stringify({ error: 'missing_contents' }), {
@@ -99,55 +122,92 @@ export async function handleGeminiProxyRequest(
 
   const budget = Math.max(
     1024,
-    Math.min(24576, Number(body.thinkingBudget) || (model === 'gemini-2.5-pro' ? 16384 : 8192))
+    Math.min(24576, Number(body.thinkingBudget) || (DEEP_MODELS.has(primaryModel) ? 16384 : 8192))
   );
 
-  const geminiPayload: Record<string, unknown> = {
-    contents: body.contents.slice(-24),
-    generationConfig: {
-      temperature:
-        typeof body.temperature === 'number'
-          ? Math.max(0.1, Math.min(1.3, body.temperature))
-          : 0.75,
-      topP: 0.92,
-      maxOutputTokens: 8192,
-      thinkingConfig: {
-        includeThoughts: true,
-        thinkingBudget: budget,
+  const buildPayload = (includeSearch: boolean): Record<string, unknown> => {
+    const payload: Record<string, unknown> = {
+      contents: body.contents!.slice(-24),
+      generationConfig: {
+        temperature:
+          typeof body.temperature === 'number'
+            ? Math.max(0.1, Math.min(1.3, body.temperature))
+            : 0.75,
+        topP: 0.92,
+        maxOutputTokens: 8192,
+        thinkingConfig: {
+          includeThoughts: true,
+          thinkingBudget: budget,
+        },
       },
-    },
+    };
+    if (body.systemInstruction && body.systemInstruction.trim().length > 0) {
+      payload.systemInstruction = {
+        parts: [{ text: body.systemInstruction.trim() }],
+      };
+    }
+    if (includeSearch) {
+      payload.tools = [{ googleSearch: {} }];
+    }
+    return payload;
   };
 
-  if (body.systemInstruction && body.systemInstruction.trim().length > 0) {
-    geminiPayload.systemInstruction = {
-      parts: [{ text: body.systemInstruction.trim() }],
-    };
+  const candidates = [
+    primaryModel,
+    ...PROXY_FALLBACK_ORDER.filter((m) => m !== primaryModel),
+  ];
+
+  const callUpstream = (model: string, includeSearch: boolean) =>
+    fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+        model
+      )}:streamGenerateContent?alt=sse`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+        },
+        signal: request.signal,
+        body: JSON.stringify(buildPayload(includeSearch)),
+      }
+    );
+
+  let upstream: Response | null = null;
+  let lastStatus = 502;
+  let lastErr = '';
+  let searchAllowed = body.enableSearch !== false;
+
+  for (const model of candidates) {
+    upstream = await callUpstream(model, searchAllowed);
+    if (upstream.ok && upstream.body) break;
+
+    lastStatus = upstream.status || 502;
+    lastErr = await upstream.text().catch(() => upstream?.statusText ?? '');
+
+    if (searchAllowed && (lastStatus === 429 || lastStatus === 403 || lastStatus === 400)) {
+      searchAllowed = false;
+      upstream = await callUpstream(model, false);
+      if (upstream.ok && upstream.body) break;
+      lastStatus = upstream.status || 502;
+      lastErr = await upstream.text().catch(() => upstream?.statusText ?? '');
+    }
+
+    if (lastStatus !== 404 && lastStatus !== 503 && lastStatus !== 429) {
+      break;
+    }
+    upstream = null;
   }
 
-  if (body.enableSearch !== false) {
-    geminiPayload.tools = [{ googleSearch: {} }];
-  }
-
-  const upstreamUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    model
-  )}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
-
-  const upstream = await fetch(upstreamUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(geminiPayload),
-  });
-
-  if (!upstream.ok || !upstream.body) {
-    const errText = await upstream.text().catch(() => upstream.statusText);
+  if (!upstream || !upstream.ok || !upstream.body) {
     return new Response(
       JSON.stringify({
         error: 'upstream_gemini_error',
-        status: upstream.status,
-        message: errText.slice(0, 500),
+        status: lastStatus,
+        message: lastErr.slice(0, 500),
       }),
       {
-        status: upstream.status || 502,
+        status: lastStatus || 502,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }
     );

@@ -2,14 +2,14 @@
 
 > **Live Preview (GitHub Pages):** https://a-vip.github.io/ask-avi/
 
-**Ask Avi** is a frontier-style conversational AI web application modeled on Avi Perera's published research, international humanitarian law work, software systems, and philosophical essays—powered by **Gemini 2.5 Extended Thinking** and live **Google Search Grounding** across the open internet.
+**Ask Avi** is a frontier-style conversational AI web application modeled on Avi Perera's published research, international humanitarian law work, software systems, and philosophical essays—powered by **Gemini 3 & 4 Extended Thinking** and live **Google Search / Open-Web Grounding** across the open internet.
 
 ---
 
 ## Key Capabilities
 
-- **Gemini 2.5 Frontier Reasoning + Live Web Search (`shared/geminiProxy.ts`)**
-  - **Gemini 2.5 Flash** (`thinkingBudget: 8192`) & **Gemini 2.5 Pro** (`thinkingBudget: 16384`) with native `includeThoughts: true` reasoning streams and `googleSearch` live internet access.
+- **Gemini 3 & 4 Frontier Reasoning + Live Web Grounding (`shared/geminiProxy.ts`)**
+  - **Gemini 3 Flash** (`thinkingBudget: 8192`) & **Gemini 4 Hydrogen** (`thinkingBudget: 16384`) with native `includeThoughts: true` reasoning streams and `googleSearch` live internet access (with automatic open-web fallback when a free-tier key has zero native Search Grounding quota).
   - **Zero Browser Downloads or Fallback Snippets:** Responds directly in Avi's first-person voice to open-ended philosophical, technical, coding, and current-affairs questions while only citing Avi's archive links when genuinely relevant.
 - **Antigravity / Claude / Gemini Reasoning UI**
   - Live elapsed thinking timer (`Thinking · Ns` → `Thought for Ns`), collapsible vertical reasoning timeline showing Google Search queries run + structured thought steps + clickable web & dossier sources.

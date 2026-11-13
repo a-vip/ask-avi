@@ -77,13 +77,23 @@ export interface ChatThread {
   messages: ChatMessage[];
 }
 
+export type GeminiModelId =
+  | 'gemini-3-flash-preview'
+  | 'gemini-3.8-flash'
+  | 'gemini-3.5-flash'
+  | 'gemini-flash-lite-latest'
+  | 'gemini-4-hydrogen'
+  | 'gemini-3.1-pro-preview'
+  | 'gemini-pro-latest';
+
 export interface EngineOption {
   id: EngineId;
   name: string;
   shortName: string;
   badge: string;
   description: string;
-  geminiModelId?: 'gemini-2.5-flash' | 'gemini-2.5-pro';
+  geminiModelId?: GeminiModelId;
+  geminiFallbackModels?: GeminiModelId[];
   thinkingBudget?: number;
 }
 

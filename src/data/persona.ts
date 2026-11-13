@@ -6,22 +6,34 @@ export const AVI_AVATAR_URL =
 export const ENGINE_OPTIONS: EngineOption[] = [
   {
     id: 'gemini-flash',
-    name: 'Gemini 2.5 Flash',
-    shortName: 'Gemini 2.5 Flash',
-    badge: 'Thinking + Search',
+    name: 'Gemini 3 Flash',
+    shortName: 'Gemini 3 Flash',
+    badge: 'Thinking + Web',
     description:
-      'Extended thinking (8k reasoning budget) with live Google Search across the internet, grounded in Avi’s voice.',
-    geminiModelId: 'gemini-2.5-flash',
+      'Extended thinking (8k reasoning budget) with live web grounding in Avi’s conversational voice.',
+    geminiModelId: 'gemini-3-flash-preview',
+    geminiFallbackModels: [
+      'gemini-3-flash-preview',
+      'gemini-3.5-flash',
+      'gemini-3.8-flash',
+      'gemini-flash-lite-latest',
+    ],
     thinkingBudget: 8192,
   },
   {
     id: 'gemini-pro',
-    name: 'Gemini 2.5 Pro',
-    shortName: 'Gemini 2.5 Pro',
-    badge: 'Deep Thinking + Search',
+    name: 'Gemini 4 Hydrogen',
+    shortName: 'Gemini 4 Deep',
+    badge: '16k Deep Think',
     description:
-      'Maximum depth extended thinking (16k reasoning budget) with live Google Search for complex philosophy, strategy, law, and coding.',
-    geminiModelId: 'gemini-2.5-pro',
+      'Deep extended thinking (16k reasoning budget) with live web grounding for complex philosophy, strategy, law, and coding.',
+    geminiModelId: 'gemini-4-hydrogen',
+    geminiFallbackModels: [
+      'gemini-4-hydrogen',
+      'gemini-3.1-pro-preview',
+      'gemini-pro-latest',
+      'gemini-3-flash-preview',
+    ],
     thinkingBudget: 16384,
   },
   {
@@ -140,7 +152,8 @@ export function buildAviSystemPrompt(
   voiceStyle: VoiceStyle,
   sources: RetrievedSource[],
   attachedSnippet?: string,
-  useInlineThoughtTags = false
+  useInlineThoughtTags = false,
+  liveWebContext?: string
 ): string {
   const styleMeta = VOICE_STYLES.find((s) => s.id === voiceStyle) ?? VOICE_STYLES[0];
 
@@ -156,6 +169,8 @@ export function buildAviSystemPrompt(
   const attachedBlock = attachedSnippet
     ? `\n\nUSER-ATTACHED DOCUMENT (respond directly to this):\n${attachedSnippet.slice(0, 2400)}`
     : '';
+
+  const webBlock = liveWebContext?.trim() ? `\n\n${liveWebContext.trim()}` : '';
 
   return [
     `You are Ask Avi — the conversational AI persona of Avi Perera (British AI governance and International Humanitarian Law researcher, legal scholar, essayist, and founder of SovDash).`,
@@ -178,6 +193,7 @@ export function buildAviSystemPrompt(
     conciseRefs
       ? `\nRELEVANT ARCHIVE LINKS BY AVI PERERA (reference [1], [2] only if directly helpful):\n${conciseRefs}`
       : '',
+    webBlock,
     attachedBlock,
   ]
     .filter(Boolean)

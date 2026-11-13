@@ -15,6 +15,31 @@ import {
   mergeUniqueWebSources,
 } from './geminiStream';
 import { knowledgeIndex } from './rag';
+import { fetchOpenWebFallback } from './webFallback';
+
+const keysWithoutNativeSearch = new Set<string>();
+
+function getKeyFingerprint(apiKey: string): string {
+  return `${apiKey.slice(0, 6)}:${apiKey.length}`;
+}
+
+function formatGeminiErrorMessage(status: number, errBody: string, statusText: string): string {
+  let detail = '';
+  try {
+    const parsed = JSON.parse(errBody) as { error?: { message?: string } };
+    detail = parsed.error?.message?.trim() ?? '';
+  } catch {
+    detail = errBody.trim();
+  }
+  const compact = (detail || statusText).slice(0, 260);
+  if (status === 401 || status === 403) {
+    return `Gemini API authentication failed (${status}): verify your Google AI Studio key in Settings. ${compact}`;
+  }
+  if (status === 429) {
+    return `Gemini API quota/rate limit reached (${status}): check your Google AI Studio billing/rate limits or try again shortly. ${compact}`;
+  }
+  return `Gemini API request failed (${status}): ${compact}`;
+}
 
 export class BackendNotConfiguredError extends Error {
   constructor(message: string) {
@@ -121,8 +146,11 @@ class AviLLMService {
       return this.streamCustomOpenAI(params, sources, elapsedMs);
     }
 
-    // 2. Native Gemini 2.5 (Extended Thinking + Live Google Search)
-    const modelId = opt.geminiModelId ?? 'gemini-2.5-flash';
+    // 2. Native Gemini 3 / 4 (Extended Thinking + Live Google Search / Open-Web Fallback)
+    const candidateModels = opt.geminiFallbackModels?.length
+      ? opt.geminiFallbackModels
+      : [opt.geminiModelId ?? 'gemini-3-flash-preview'];
+    const primaryModelId = candidateModels[0];
     const thinkingBudget = opt.thinkingBudget ?? 8192;
     const directKey = params.geminiApiKey?.trim();
     const proxyUrl = resolveEffectiveProxyUrl(params.proxyUrl);
@@ -132,13 +160,6 @@ class AviLLMService {
         'Connect your Gemini API key in Settings (or configure ASK_AVI_API_ENDPOINT to your Vercel/Cloudflare proxy) to enable live thinking and internet search.'
       );
     }
-
-    const systemInstruction = buildAviSystemPrompt(
-      params.voiceStyle,
-      sources,
-      params.attachedContext?.content,
-      false
-    );
 
     const historyTurns = buildConversationWindow(params.history, 14, 16000);
     const contents = [
@@ -150,75 +171,144 @@ class AviLLMService {
     ];
 
     const temperature = params.voiceStyle === 'academic' ? 0.5 : 0.78;
+    let webSearchQueries: string[] = [];
+    let webSources: WebSource[] = [];
+    let liveWebContext = '';
+    let activeModelId = primaryModelId;
 
-    let response: Response;
+    const buildInstruction = () =>
+      buildAviSystemPrompt(
+        params.voiceStyle,
+        sources,
+        params.attachedContext?.content,
+        false,
+        liveWebContext
+      );
+
+    let response: Response | null = null;
+    let lastStatus = 502;
+    let lastErrBody = '';
+    let lastStatusText = 'Bad Gateway';
+
     if (directKey) {
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-        modelId
-      )}:streamGenerateContent?alt=sse&key=${encodeURIComponent(directKey)}`;
+      const fingerprint = getKeyFingerprint(directKey);
+      let nativeSearchAllowed = params.webSearchEnabled && !keysWithoutNativeSearch.has(fingerprint);
+      let fetchedOpenWeb = false;
 
-      const bodyPayload: Record<string, unknown> = {
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        contents,
-        generationConfig: {
-          temperature,
-          topP: 0.92,
-          maxOutputTokens: 8192,
-          thinkingConfig: {
-            includeThoughts: true,
-            thinkingBudget,
-          },
-        },
+      const ensureOpenWebFallback = async () => {
+        if (fetchedOpenWeb || !params.webSearchEnabled) return;
+        fetchedOpenWeb = true;
+        const fallback = await fetchOpenWebFallback(params.query, params.signal);
+        if (fallback.queries.length > 0) {
+          webSearchQueries = mergeUniqueQueries(webSearchQueries, fallback.queries);
+        }
+        if (fallback.webSources.length > 0) {
+          webSources = mergeUniqueWebSources(webSources, fallback.webSources);
+          liveWebContext = fallback.contextBlock;
+        }
       };
-      if (params.webSearchEnabled) {
-        bodyPayload.tools = [{ googleSearch: {} }];
+
+      if (params.webSearchEnabled && !nativeSearchAllowed) {
+        await ensureOpenWebFallback();
       }
 
-      response = await fetch(geminiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: params.signal,
-        body: JSON.stringify(bodyPayload),
-      });
+      const sendDirectRequest = (modelId: string, withNativeSearch: boolean) => {
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+          modelId
+        )}:streamGenerateContent?alt=sse`;
+        const bodyPayload: Record<string, unknown> = {
+          systemInstruction: { parts: [{ text: buildInstruction() }] },
+          contents,
+          generationConfig: {
+            temperature,
+            topP: 0.92,
+            maxOutputTokens: 8192,
+            thinkingConfig: {
+              includeThoughts: true,
+              thinkingBudget,
+            },
+          },
+        };
+        if (withNativeSearch) {
+          bodyPayload.tools = [{ googleSearch: {} }];
+        }
+        return fetch(geminiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': directKey,
+          },
+          signal: params.signal,
+          body: JSON.stringify(bodyPayload),
+        });
+      };
+
+      for (const candidate of candidateModels) {
+        if (params.signal?.aborted) break;
+        activeModelId = candidate;
+        response = await sendDirectRequest(candidate, nativeSearchAllowed);
+        if (response.ok && response.body) break;
+
+        lastStatus = response.status;
+        lastStatusText = response.statusText;
+        lastErrBody = await response.text().catch(() => '');
+
+        // Free-tier Google AI Studio keys often have 0 quota for native googleSearch tool;
+        // degrade cleanly to CORS open-web search + full Gemini reasoning without Instant Archive.
+        if (nativeSearchAllowed && (lastStatus === 429 || lastStatus === 403 || lastStatus === 400)) {
+          nativeSearchAllowed = false;
+          keysWithoutNativeSearch.add(fingerprint);
+          await ensureOpenWebFallback();
+          response = await sendDirectRequest(candidate, false);
+          if (response.ok && response.body) break;
+
+          lastStatus = response.status;
+          lastStatusText = response.statusText;
+          lastErrBody = await response.text().catch(() => '');
+        }
+
+        response = null;
+        if (lastStatus !== 404 && lastStatus !== 503 && lastStatus !== 429) {
+          break;
+        }
+      }
     } else {
       response = await fetch(proxyUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: params.signal,
         body: JSON.stringify({
-          model: modelId,
-          systemInstruction,
+          model: primaryModelId,
+          systemInstruction: buildInstruction(),
           contents,
           thinkingBudget,
           enableSearch: params.webSearchEnabled,
           temperature,
         }),
       });
+      if (!response.ok || !response.body) {
+        lastStatus = response.status;
+        lastStatusText = response.statusText;
+        lastErrBody = await response.text().catch(() => '');
+        response = null;
+      }
     }
 
-    if (!response.ok || !response.body) {
-      let errBody = '';
-      try {
-        errBody = await response.text();
-      } catch {
-        // Ignore read error
-      }
+    if (!response || !response.ok || !response.body) {
       if (
-        response.status === 503 &&
-        (errBody.includes('proxy_unconfigured') || errBody.includes('GEMINI_API_KEY'))
+        lastStatus === 503 &&
+        (lastErrBody.includes('proxy_unconfigured') || lastErrBody.includes('GEMINI_API_KEY'))
       ) {
         throw new BackendNotConfiguredError(
           'Serverless proxy is live, awaiting GEMINI_API_KEY configuration—or paste a personal Gemini API key in Settings to test right away.'
         );
       }
-      if (response.status === 404 && !directKey) {
+      if (lastStatus === 404 && !directKey) {
         throw new BackendNotConfiguredError(
           'No live API backend is connected at this origin yet. Add a Gemini API key or serverless proxy URL in Settings.'
         );
       }
-      throw new Error(
-        `Gemini API request failed (${response.status}): ${errBody.slice(0, 240) || response.statusText}`
-      );
+      throw new Error(formatGeminiErrorMessage(lastStatus, lastErrBody, lastStatusText));
     }
 
     const reader = response.body.getReader();
@@ -229,8 +319,6 @@ class AviLLMService {
     let buffer = '';
     let accumulatedThoughts = '';
     let accumulatedAnswer = '';
-    let webSearchQueries: string[] = [];
-    let webSources: WebSource[] = [];
 
     const emitUpdate = (stillThinking: boolean) => {
       const now = Date.now();
@@ -291,6 +379,25 @@ class AviLLMService {
       }
     }
 
+    const leftover = buffer.trim();
+    if (leftover.startsWith('data:')) {
+      const data = leftover.slice(5).trim();
+      if (data && data !== '[DONE]') {
+        const delta = extractGeminiChunkDelta(data);
+        if (delta.thoughtDelta) accumulatedThoughts += delta.thoughtDelta;
+        if (delta.answerDelta) {
+          if (!accumulatedAnswer && !thinkingEndedAt) thinkingEndedAt = Date.now();
+          accumulatedAnswer += delta.answerDelta;
+        }
+        if (delta.webSearchQueries.length > 0) {
+          webSearchQueries = mergeUniqueQueries(webSearchQueries, delta.webSearchQueries);
+        }
+        if (delta.webSources.length > 0) {
+          webSources = mergeUniqueWebSources(webSources, delta.webSources);
+        }
+      }
+    }
+
     const finalThinkingMs = (thinkingEndedAt || Date.now()) - startedAt;
 
     return {
@@ -301,7 +408,7 @@ class AviLLMService {
       webSearchQueries,
       webSources,
       engineUsed: params.engineId,
-      modelLabel: opt.shortName,
+      modelLabel: activeModelId === primaryModelId ? opt.shortName : activeModelId,
       sources,
       retrievalMs: elapsedMs,
       followUps: deriveFollowUps(sources, webSources, accumulatedAnswer),

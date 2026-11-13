@@ -107,6 +107,7 @@ function ask_avi_stream_upstream(
         http_response_code(200);
         header('Content-Type: text/event-stream; charset=utf-8');
         header('Cache-Control: no-cache, no-transform');
+        header('X-LiteSpeed-Cache-Control: no-cache');
         header('X-Accel-Buffering: no');
         header('X-Ask-Avi-Protocol: ' . $protocol);
         header('X-Ask-Avi-Model: ' . $modelLabel);

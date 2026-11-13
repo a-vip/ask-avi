@@ -20,6 +20,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 $reqUser = ask_avi_resolve_request_user();
 
+function ask_avi_insert_user_row(string $table, array $row): void {
+  global $wpdb;
+  $clean = array_filter($row, static fn($v) => $v !== null);
+  $wpdb->insert($table, $clean);
+}
+
+function ask_avi_sync_wp_lead(string $email): void {
+  if (!function_exists('wp_insert_post')) {
+    return;
+  }
+  $exists = function_exists('avi_lead_exists') ? avi_lead_exists($email) : false;
+  if (!$exists) {
+    wp_insert_post([
+      'post_title' => $email,
+      'post_type' => 'avi_lead',
+      'post_status' => 'publish',
+    ]);
+  }
+}
+
 function ask_avi_format_client_user(array $row, ?string $token = null): array {
   $email = strtolower((string) $row['email']);
   $res = [
@@ -147,7 +167,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
           'chat_count' => 0,
           'error_count' => 0,
         ];
-        $wpdb->insert($users_table, $row);
+        ask_avi_insert_user_row($users_table, $row);
         $existing = $row;
       } else {
         $wpdb->update($users_table, [
@@ -243,7 +263,7 @@ if ($action === 'google') {
       'chat_count' => 0,
       'error_count' => 0,
     ];
-    $wpdb->insert($users_table, $existing);
+    ask_avi_insert_user_row($users_table, $existing);
   } else {
     $wpdb->update($users_table, [
       'name' => $name,
@@ -259,6 +279,10 @@ if ($action === 'google') {
     $existing['provider'] = 'google';
     $existing['role'] = $role;
     $existing['last_seen_at'] = $nowMs;
+  }
+
+  if (!empty($optIn)) {
+    ask_avi_sync_wp_lead($email);
   }
 
   ask_avi_record_log([
@@ -329,7 +353,10 @@ if ($action === 'signup' || $action === 'signin') {
       'chat_count' => 0,
       'error_count' => 0,
     ];
-    $wpdb->insert($users_table, $row);
+    ask_avi_insert_user_row($users_table, $row);
+    if (!empty($optIn)) {
+      ask_avi_sync_wp_lead($email);
+    }
     ask_avi_record_log([
       'type' => 'auth_signup',
       'level' => 'info',
@@ -359,7 +386,7 @@ if ($action === 'signup' || $action === 'signin') {
         'chat_count' => 0,
         'error_count' => 0,
       ];
-      $wpdb->insert($users_table, $row);
+      ask_avi_insert_user_row($users_table, $row);
       ask_avi_record_log([
         'type' => 'auth_signup',
         'level' => 'info',

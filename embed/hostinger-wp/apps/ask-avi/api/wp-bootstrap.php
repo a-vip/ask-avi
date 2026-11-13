@@ -238,7 +238,7 @@ function ask_avi_record_log(array $entry): void {
   ask_avi_ensure_tables();
   $logs_table = $wpdb->prefix . 'ask_avi_logs';
   $nowMs = (int) round(microtime(true) * 1000);
-  $wpdb->insert($logs_table, [
+  $row = array_filter([
     'id' => 'log_' . bin2hex(random_bytes(6)),
     'ts' => $nowMs,
     'type' => substr((string) ($entry['type'] ?? 'chat_ok'), 0, 32),
@@ -248,7 +248,8 @@ function ask_avi_record_log(array $entry): void {
     'status_code' => isset($entry['status_code']) ? (int) $entry['status_code'] : null,
     'latency_ms' => isset($entry['latency_ms']) ? (int) $entry['latency_ms'] : null,
     'message' => substr((string) ($entry['message'] ?? ''), 0, 500),
-  ]);
+  ], static fn($v) => $v !== null);
+  $wpdb->insert($logs_table, $row);
 }
 
 function ask_avi_record_chat_telemetry(?array $user, int $statusCode, ?string $modelUsed, int $latencyMs, ?string $errorMessage = null): void {
@@ -289,7 +290,8 @@ function ask_avi_record_chat_telemetry(?array $user, int $statusCode, ?string $m
 function ask_avi_send_json(int $status, array $payload): void {
   http_response_code($status);
   header('Content-Type: application/json; charset=utf-8');
-  header('Cache-Control: no-store');
+  header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+  header('X-LiteSpeed-Cache-Control: no-cache');
   echo json_encode($payload);
   exit;
 }

@@ -8,6 +8,89 @@ if (!defined('ABSPATH')) {
   exit;
 }
 
+/**
+ * Automatically create & publish https://aviperera.com/ask-avi/ with the Ask Avi template,
+ * provision database tables, and purge LiteSpeed caches on new theme version rollout.
+ */
+add_action('init', static function () {
+  if (get_option('ask_avi_deployment_ver') === '20261114a') {
+    return;
+  }
+
+  $bootstrap = get_template_directory() . '/apps/ask-avi/api/wp-bootstrap.php';
+  if (file_exists($bootstrap)) {
+    require_once $bootstrap;
+    ask_avi_ensure_tables();
+  }
+
+  $page = get_page_by_path('ask-avi');
+  if (!$page) {
+    $page_id = wp_insert_post([
+      'post_title' => 'Ask Avi',
+      'post_name' => 'ask-avi',
+      'post_status' => 'publish',
+      'post_type' => 'page',
+      'post_content' => '',
+    ]);
+    if ($page_id && !is_wp_error($page_id)) {
+      update_post_meta($page_id, '_wp_page_template', 'page-ask-avi.php');
+    }
+  } else {
+    update_post_meta($page->ID, '_wp_page_template', 'page-ask-avi.php');
+    if ($page->post_status !== 'publish') {
+      wp_update_post([
+        'ID' => $page->ID,
+        'post_status' => 'publish',
+      ]);
+    }
+  }
+
+  update_option('ask_avi_deployment_ver', '20261114a', false);
+  flush_rewrite_rules(false);
+  do_action('litespeed_purge_all');
+  if (class_exists('\LiteSpeed\Purge')) {
+    \LiteSpeed\Purge::purge_all();
+  }
+});
+
+// Clean SEO page title on /ask-avi/
+add_filter('pre_get_document_title', static function ($title) {
+  if (is_page('ask-avi') || is_page_template('page-ask-avi.php')) {
+    return 'Ask Avi — AI Persona · Avi Perera';
+  }
+  return $title;
+}, 99999);
+
+add_filter('document_title_parts', static function ($parts) {
+  if (is_page('ask-avi') || is_page_template('page-ask-avi.php')) {
+    $parts['title'] = 'Ask Avi — AI Persona';
+  }
+  return $parts;
+}, 99999);
+
+// Prevent LiteSpeed Cache lazy-loading from rewriting the Ask Avi iframe to about:blank on mobile
+add_filter('litespeed_optm_html_lazy_iframe_exc', static function ($excludes) {
+  $excludes[] = 'ask-avi-host-frame';
+  $excludes[] = 'apps/ask-avi';
+  return $excludes;
+});
+
+add_action('template_redirect', static function () {
+  if (is_page('ask-avi') || is_page_template('page-ask-avi.php')) {
+    do_action('litespeed_conf_force', 'media-iframe_lazy', false);
+    return;
+  }
+
+  // Provide aviperera.com/ask as a clean shortlink redirect to aviperera.com/ask-avi/
+  if (is_404() && !empty($_SERVER['REQUEST_URI'])) {
+    $path = trim((string) wp_parse_url(wp_unslash($_SERVER['REQUEST_URI']), PHP_URL_PATH), '/');
+    if (strtolower($path) === 'ask') {
+      wp_safe_redirect(home_url('/ask-avi/'), 301);
+      exit;
+    }
+  }
+});
+
 add_action('admin_menu', static function () {
   add_menu_page(
     'Ask Avi',
@@ -96,7 +179,11 @@ function ask_avi_render_admin_page(): void {
   ?>
   <div class="wrap">
     <h1>Ask Avi — AI Persona Administration</h1>
-    <p>Public route: <code><?php echo esc_html(home_url('/ask-avi/')); ?></code> · Users signed up here can be exported for outreach &amp; troubleshooting.</p>
+    <p>
+      Public route: <code><?php echo esc_html(home_url('/ask-avi/')); ?></code>
+      (shortlink: <code><?php echo esc_html(home_url('/ask/')); ?></code>) ·
+      <a href="<?php echo esc_url(home_url('/ask-avi/')); ?>" target="_blank" class="button button-secondary" style="margin-left:8px;">Open Live Ask Avi (/ask-avi/) &nearr;</a>
+    </p>
 
     <?php if ($saved): ?>
       <div class="notice notice-success is-dismissible"><p>Ask Avi backend keys saved securely in WordPress options.</p></div>

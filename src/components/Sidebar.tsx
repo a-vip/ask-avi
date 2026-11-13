@@ -12,8 +12,9 @@ import {
   X,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { ENGINE_OPTIONS } from '../data/persona';
 import { KNOWLEDGE_META } from '../engine/rag';
-import type { ChatThread, EngineId, ModelLoadProgress } from '../types/chat';
+import type { ChatThread, EngineId } from '../types/chat';
 import { groupThreadsByRecency } from '../utils/storage';
 import { AviAvatar } from './AviAvatar';
 
@@ -23,8 +24,7 @@ interface SidebarProps {
   threads: ChatThread[];
   activeThreadId: string | null;
   activeEngineId: EngineId;
-  modelProgress: ModelLoadProgress;
-  webGpuSupported: boolean | null;
+  backendConnected: boolean;
   onCloseMobile: () => void;
   onToggleCollapse: () => void;
   onNewChat: () => void;
@@ -42,8 +42,7 @@ export function Sidebar({
   threads,
   activeThreadId,
   activeEngineId,
-  modelProgress,
-  webGpuSupported,
+  backendConnected,
   onCloseMobile,
   onToggleCollapse,
   onNewChat,
@@ -69,23 +68,11 @@ export function Sidebar({
   }, [threads, searchQuery]);
 
   const groups = useMemo(() => groupThreadsByRecency(filtered), [filtered]);
+  const activeOption = ENGINE_OPTIONS.find((o) => o.id === activeEngineId) ?? ENGINE_OPTIONS[0];
 
-  const engineStatusLabel = useMemo(() => {
-    if (modelProgress.status === 'loading') {
-      const pct = Math.round(modelProgress.progress * 100);
-      return `Loading Neural Model (${pct}%)`;
-    }
-    if (activeEngineId === 'instant') {
-      return webGpuSupported ? 'Instant Archive · WebGPU Ready' : 'Instant Archive Engine';
-    }
-    if (activeEngineId === 'custom-api') {
-      return 'Custom API Mode';
-    }
-    if (modelProgress.status === 'ready' && modelProgress.engineId === activeEngineId) {
-      return 'WebGPU Neural Active';
-    }
-    return 'WebGPU Neural Selected';
-  }, [activeEngineId, modelProgress, webGpuSupported]);
+  const engineStatusLabel = backendConnected
+    ? `${activeOption.shortName} · Live Web`
+    : 'Connect Gemini API / Proxy';
 
   if (!isOpen) return null;
 
@@ -261,18 +248,15 @@ export function Sidebar({
         </div>
 
         <div className="sidebar-footer">
-          <div className="engine-status-pill" title={engineStatusLabel}>
-            <span
-              className={`status-dot ${
-                modelProgress.status === 'loading'
-                  ? 'loading'
-                  : webGpuSupported || activeEngineId === 'instant'
-                    ? 'ready'
-                    : 'warn'
-              }`}
-            />
+          <button
+            type="button"
+            className="engine-status-pill clickable"
+            onClick={onOpenSettings}
+            title={engineStatusLabel}
+          >
+            <span className={`status-dot ${backendConnected ? 'ready' : 'warn'}`} />
             <span className="status-label">{engineStatusLabel}</span>
-          </div>
+          </button>
 
           <div className="sidebar-footer-links">
             <button
@@ -281,7 +265,7 @@ export function Sidebar({
               onClick={onOpenSettings}
             >
               <Settings size={15} />
-              <span>Engine &amp; Settings</span>
+              <span>Settings</span>
             </button>
             <a
               href="https://aviperera.com"

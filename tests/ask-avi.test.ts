@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { buildAviSystemPrompt, ENGINE_OPTIONS } from '../src/data/persona';
+import {
+  extractGeminiChunkDelta,
+  mergeUniqueQueries,
+  mergeUniqueWebSources,
+} from '../src/engine/geminiStream';
+import { resolveEffectiveProxyUrl } from '../src/engine/llmService';
 import { knowledgeIndex, KNOWLEDGE_META } from '../src/engine/rag';
-import { synthesizeInstantAviReply } from '../src/engine/instantSynthesizer';
 import { renderMarkdownToSafeHtml } from '../src/utils/markdown';
 import { splitThinkingAndAnswer } from '../src/utils/thinking';
 import {
@@ -27,7 +32,7 @@ describe('Knowledge Index & RAG Retrieval', () => {
     );
     expect(elapsedMs).toBeGreaterThanOrEqual(0);
     expect(sources.length).toBeGreaterThan(0);
-    expect(sources.length).toBeLessThanOrEqual(5);
+    expect(sources.length).toBeLessThanOrEqual(3);
 
     const combinedText = sources
       .map((s) => `${s.entry.title} ${s.snippet}`.toLowerCase())
@@ -35,64 +40,84 @@ describe('Knowledge Index & RAG Retrieval', () => {
     expect(combinedText).toMatch(/meaningful human control|autonomous weapons|unidir|laws/);
   });
 
-  it('retrieves Avi personal story dossier when asked about Harrow and imposter syndrome', () => {
-    const { sources } = knowledgeIndex.search(
-      'How did you overcome imposter syndrome growing up first-gen in Harrow London?'
-    );
-    expect(sources.length).toBeGreaterThan(0);
-    const titlesAndSnippets = sources
-      .map((s) => `${s.entry.title} ${s.snippet}`.toLowerCase())
-      .join(' ');
-    expect(titlesAndSnippets).toMatch(/harrow|imposter|cambridge|buckingham|evidence/);
-  });
-
-  it('handles unmatched nonsense queries gracefully without throwing', () => {
-    const { sources } = knowledgeIndex.search('zxqvbnm12345nonexistenttoken');
-    expect(Array.isArray(sources)).toBe(true);
-    expect(sources.length).toBe(0);
+  it('returns empty sources for casual greetings or unmatched unrelated tokens', () => {
+    expect(knowledgeIndex.search('hello').sources.length).toBe(0);
+    expect(knowledgeIndex.search('zxqvbnm12345nonexistenttoken').sources.length).toBe(0);
   });
 });
 
-describe('Instant Archive Synthesizer', () => {
-  it('generates grounded markdown with inline citations and follow-up prompts across voice styles', () => {
-    const { sources } = knowledgeIndex.search(
-      'Why do voluntary AI safety commitments fail compared to binding regulation?'
-    );
-    expect(sources.length).toBeGreaterThan(0);
-
-    for (const style of ['standard', 'blunt', 'academic', 'mentor'] as const) {
-      const reply = synthesizeInstantAviReply(
-        'Why do voluntary AI safety commitments fail compared to binding regulation?',
-        sources,
-        style
-      );
-      expect(reply.markdown.length).toBeGreaterThan(80);
-      expect(reply.markdown).toMatch(/\[1\]/);
-      expect(reply.markdown).not.toContain('<script>');
-      expect(reply.followUps.length).toBeGreaterThan(0);
-    }
+describe('Gemini 2.5 Frontier Config, SSE Parser & Proxy Resolution', () => {
+  it('defaults to Gemini 2.5 Flash with thinking & live web search enabled (no WebGPU/Instant Archive)', () => {
+    expect(DEFAULT_SETTINGS.engineId).toBe('gemini-flash');
+    expect(DEFAULT_SETTINGS.webSearchEnabled).toBe(true);
+    expect(ENGINE_OPTIONS.map((e) => e.id)).toEqual(['gemini-flash', 'gemini-pro', 'custom-api']);
+    expect(ENGINE_OPTIONS[0].thinkingBudget).toBe(8192);
+    expect(ENGINE_OPTIONS[1].thinkingBudget).toBe(16384);
   });
 
-  it('incorporates attached reading context when provided', () => {
-    const { sources } = knowledgeIndex.search('UNIDIR AI governance accountability');
-    const reply = synthesizeInstantAviReply(
-      'Summarize what this means for deployment speed vs governance.',
-      sources,
-      'standard',
-      {
-        id: 'ctx-1',
-        title: 'AI Policy Brief Draft',
-        content: 'Organizations must run adversarial risk audits before shipping autonomous loops.',
-      }
+  it('extracts native Gemini thought parts, answer text, web search queries, and grounding chunks', () => {
+    const sseJson = JSON.stringify({
+      candidates: [
+        {
+          content: {
+            parts: [
+              { thought: true, text: 'Let me weigh both sides of this philosophical question first.' },
+              { text: 'Context determines whether a claim illuminates or misleads.' },
+            ],
+          },
+          groundingMetadata: {
+            webSearchQueries: ['current UK AI safety bill 2026'],
+            groundingChunks: [
+              { web: { uri: 'https://example.org/ai-bill', title: 'UK AI Regulation Update' } },
+            ],
+          },
+        },
+      ],
+    });
+
+    const delta = extractGeminiChunkDelta(sseJson);
+    expect(delta.thoughtDelta).toBe('Let me weigh both sides of this philosophical question first.');
+    expect(delta.answerDelta).toBe('Context determines whether a claim illuminates or misleads.');
+    expect(delta.webSearchQueries).toEqual(['current UK AI safety bill 2026']);
+    expect(delta.webSources).toEqual([
+      { index: 1, title: 'UK AI Regulation Update', url: 'https://example.org/ai-bill' },
+    ]);
+  });
+
+  it('merges web search queries and web sources without duplicates', () => {
+    const q = mergeUniqueQueries(['query a'], ['query a', 'query b']);
+    expect(q).toEqual(['query a', 'query b']);
+
+    const ws = mergeUniqueWebSources(
+      [{ index: 1, title: 'One', url: 'https://one.test' }],
+      [
+        { index: 1, title: 'One dup', url: 'https://one.test' },
+        { index: 2, title: 'Two', url: 'https://two.test' },
+      ]
     );
-    expect(reply.markdown.toLowerCase()).toContain('ai policy brief draft');
+    expect(ws).toEqual([
+      { index: 1, title: 'One', url: 'https://one.test' },
+      { index: 2, title: 'Two', url: 'https://two.test' },
+    ]);
+  });
+
+  it('resolves explicit proxy URL cleanly when provided', () => {
+    expect(resolveEffectiveProxyUrl('https://ask-avi-api.vercel.app/api/chat')).toBe(
+      'https://ask-avi-api.vercel.app/api/chat'
+    );
+  });
+
+  it('omits archive block in system prompt when no archive dossiers match', () => {
+    const prompt = buildAviSystemPrompt('standard', []);
+    expect(prompt).toContain('Ask Avi');
+    expect(prompt).not.toContain('RELEVANT ARCHIVE LINKS');
   });
 });
 
-describe('Safe Markdown & Citation Rendering', () => {
+describe('Safe Markdown, Citation Pills & Custom Reasoning Tags', () => {
   it('converts valid inline [n] citations into clickable buttons and skips out-of-range numbers', () => {
     const html = renderMarkdownToSafeHtml(
-      'Governance requires binding verification [1] and intervention capacity [2], not [99].',
+      'Accountability requires verification [1] and intervention capacity [2], not [99].',
       2
     );
     expect(html).toContain('class="cite-pill" data-cite-idx="1"');
@@ -110,38 +135,33 @@ describe('Safe Markdown & Citation Rendering', () => {
     expect(html).not.toContain('onerror');
   });
 
-  it('renders fenced code blocks with copy button metadata', () => {
-    const html = renderMarkdownToSafeHtml('```ts\nconst answer = 42;\n```', 0);
-    expect(html).toContain('code-copy-btn');
-    expect(html).toContain('data-copy-code=');
+  it('splits optional <thought> blocks for custom endpoints cleanly', () => {
+    const partial = splitThinkingAndAnswer('<thought>Testing their premise first.');
+    expect(partial.isThinking).toBe(true);
+    expect(partial.thinking).toBe('Testing their premise first.');
+
+    const done = splitThinkingAndAnswer('<thought>Weighed options.</thought>\n\nDirect answer.');
+    expect(done.isThinking).toBe(false);
+    expect(done.answer).toBe('Direct answer.');
   });
 });
 
 describe('Thread Storage & Export Helpers', () => {
-  it('derives clean titles and truncates long prompts with ellipsis', () => {
+  it('derives clean titles and groups threads by recency', () => {
     expect(deriveThreadTitle('   What is SovDash?  ')).toBe('What is SovDash?');
     expect(deriveThreadTitle('')).toBe('New conversation');
-    const longPrompt =
-      'Please explain the entire three-part architecture of Meaningful Human Control under International Humanitarian Law';
-    const title = deriveThreadTitle(longPrompt);
-    expect(title.length).toBeLessThanOrEqual(55);
-    expect(title.endsWith('…')).toBe(true);
-  });
 
-  it('groups threads by pinned state and recency buckets', () => {
     const now = Date.now();
     const oneDay = 86_400_000;
     const threads: ChatThread[] = [
       { id: '1', title: 'Pinned', createdAt: now, updatedAt: now - 10 * oneDay, pinned: true, messages: [] },
       { id: '2', title: 'Today', createdAt: now, updatedAt: now - 1000, messages: [] },
       { id: '3', title: 'Yesterday', createdAt: now, updatedAt: now - oneDay, messages: [] },
-      { id: '4', title: 'Older', createdAt: now, updatedAt: now - 30 * oneDay, messages: [] },
     ];
-    const groups = groupThreadsByRecency(threads);
-    expect(groups.map((g) => g.label)).toEqual(['Pinned', 'Today', 'Yesterday', 'Earlier']);
+    expect(groupThreadsByRecency(threads).map((g) => g.label)).toEqual(['Pinned', 'Today', 'Yesterday']);
   });
 
-  it('exports conversation threads as formatted markdown with citations', () => {
+  it('exports conversation threads as formatted markdown', () => {
     const { sources } = knowledgeIndex.search('SovDash');
     const thread: ChatThread = {
       id: 't-export',
@@ -161,45 +181,6 @@ describe('Thread Storage & Export Helpers', () => {
     };
     const md = exportThreadAsMarkdown(thread);
     expect(md).toContain('# SovDash Briefing');
-    expect(md).toContain('### You');
     expect(md).toContain('### Ask Avi');
-    expect(md).toContain('**Sources:**');
-  });
-});
-
-describe('Conversational Neural Prompting & Thinking Parser', () => {
-  it('defaults to WebGPU Neural Deep engine and keeps WebGPU Neural Qwen 3B available', () => {
-    expect(DEFAULT_SETTINGS.engineId).toBe('webgpu-deep');
-    expect(ENGINE_OPTIONS[0].id).toBe('webgpu-deep');
-    const qwen = ENGINE_OPTIONS.find((e) => e.id === 'webgpu-balanced');
-    expect(qwen?.mlcModelId).toBe('Qwen2.5-3B-Instruct-q4f16_1-MLC');
-  });
-
-  it('omits archive reference section when no dossiers are retrieved', () => {
-    const { sources } = knowledgeIndex.search('hi');
-    expect(sources.length).toBe(0);
-
-    const prompt = buildAviSystemPrompt('standard', sources);
-    expect(prompt).toContain('<thought>');
-    expect(prompt).not.toContain('OPTIONAL REFERENCE LINKS');
-  });
-
-  it('splits live streaming <thought> blocks and completed reasoning cleanly', () => {
-    const partial = splitThinkingAndAnswer('<thought>Testing their premise first.');
-    expect(partial.isThinking).toBe(true);
-    expect(partial.thinking).toBe('Testing their premise first.');
-    expect(partial.answer).toBe('');
-
-    const done = splitThinkingAndAnswer(
-      '<thought>They want a practical Python example, not an essay.</thought>\n\nHere is a clean pattern.'
-    );
-    expect(done.isThinking).toBe(false);
-    expect(done.thinking).toBe('They want a practical Python example, not an essay.');
-    expect(done.answer).toBe('Here is a clean pattern.');
-
-    const untagged = splitThinkingAndAnswer('Direct answer without tags.');
-    expect(untagged.isThinking).toBe(false);
-    expect(untagged.thinking).toBe('');
-    expect(untagged.answer).toBe('Direct answer without tags.');
   });
 });

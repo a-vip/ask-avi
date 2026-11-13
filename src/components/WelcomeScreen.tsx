@@ -1,7 +1,7 @@
 import { Sparkles } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { getTimeGreeting, STARTER_PROMPTS, VERIFIED_LINKS } from '../data/persona';
-import type { AttachedContext, ModelLoadProgress, VoiceStyle } from '../types/chat';
+import type { AttachedContext, VoiceStyle } from '../types/chat';
 import { AviAvatar } from './AviAvatar';
 import { Composer } from './Composer';
 
@@ -16,7 +16,6 @@ interface WelcomeScreenProps {
   attachedContext: AttachedContext | null;
   onAttachContext: (ctx: AttachedContext | null) => void;
   onOpenDossierPicker: () => void;
-  modelProgress: ModelLoadProgress;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
 }
 
@@ -33,7 +32,6 @@ export function WelcomeScreen({
   attachedContext,
   onAttachContext,
   onOpenDossierPicker,
-  modelProgress,
   inputRef,
 }: WelcomeScreenProps) {
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -75,17 +73,6 @@ export function WelcomeScreen({
           centered
           inputRef={inputRef}
         />
-
-        {modelProgress.status === 'loading' && (
-          <div className="engine-callout-row">
-            <div className="webgpu-loading-pill">
-              <Sparkles size={14} className="spin-subtle" />
-              <span>
-                Preparing neural engine ({Math.round(modelProgress.progress * 100)}%)…
-              </span>
-            </div>
-          </div>
-        )}
 
         <div className="starter-section">
           <div className="starter-filters" role="tablist" aria-label="Prompt categories">

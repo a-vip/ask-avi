@@ -37,6 +37,8 @@ jobs:
         run: npm test
 
       - name: Build production bundle
+        env:
+          VITE_API_ENDPOINT: ${{ vars.ASK_AVI_API_ENDPOINT || '' }}
         run: npm run build
 
       - name: Setup Pages

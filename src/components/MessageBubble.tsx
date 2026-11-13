@@ -1,70 +1,98 @@
 import {
   BookOpen,
-  Brain,
   Check,
   ChevronDown,
   ChevronRight,
   Copy,
-  ExternalLink,
   FileText,
+  Globe,
+  KeyRound,
   Pencil,
   RotateCcw,
+  Search,
+  Sparkles,
   ThumbsDown,
   ThumbsUp,
   Volume2,
   VolumeX,
-  Zap,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ChatMessage, ModelLoadProgress, RetrievedSource } from '../types/chat';
+import type { ChatMessage, RetrievedSource } from '../types/chat';
 import { renderMarkdownToSafeHtml } from '../utils/markdown';
-import { splitThinkingAndAnswer } from '../utils/thinking';
 import { AviAvatar } from './AviAvatar';
 
 interface MessageBubbleProps {
   message: ChatMessage;
   isLastAssistant: boolean;
-  modelProgress: ModelLoadProgress;
   onEditUserMessage: (messageId: string, newContent: string) => void;
   onRegenerate: (assistantMessageId: string) => void;
   onFollowUpClick: (prompt: string) => void;
   onInspectSource: (sources: RetrievedSource[], focusIndex: number) => void;
   onFeedback: (messageId: string, vote: 'up' | 'down' | null) => void;
-  onFallbackToInstant: () => void;
+  onOpenSettings: () => void;
 }
 
 export function MessageBubble({
   message,
   isLastAssistant,
-  modelProgress,
   onEditUserMessage,
   onRegenerate,
   onFollowUpClick,
   onInspectSource,
   onFeedback,
-  onFallbackToInstant,
+  onOpenSettings,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(message.content);
-  const [sourcesExpanded, setSourcesExpanded] = useState(false);
-  const [thinkingExpanded, setThinkingExpanded] = useState(false);
+  const [userExpandedOverride, setUserExpandedOverride] = useState<boolean | null>(null);
   const [speaking, setSpeaking] = useState(false);
+  const [liveSec, setLiveSec] = useState<number>(0);
   const contentRef = useRef<HTMLDivElement>(null);
 
   const sourcesCount = message.sources?.length ?? 0;
 
-  const { thinking, answer, isThinking } = useMemo(() => {
-    if (message.role !== 'assistant') {
-      return { thinking: '', answer: message.content, isThinking: false };
-    }
-    return splitThinkingAndAnswer(message.content);
-  }, [message.role, message.content]);
+  const renderedAnswerHtml = useMemo(() => {
+    if (message.role !== 'assistant' || !message.content) return '';
+    return renderMarkdownToSafeHtml(message.content, sourcesCount);
+  }, [message.role, message.content, sourcesCount]);
 
-  const renderedHtml = useMemo(() => {
-    if (message.role !== 'assistant' || !answer) return '';
-    return renderMarkdownToSafeHtml(answer, sourcesCount);
-  }, [message.role, answer, sourcesCount]);
+  const renderedThoughtHtml = useMemo(() => {
+    if (message.role !== 'assistant' || !message.thoughts) return '';
+    return renderMarkdownToSafeHtml(message.thoughts, 0);
+  }, [message.role, message.thoughts]);
+
+  // Live seconds ticker while actively thinking
+  useEffect(() => {
+    if (message.role !== 'assistant' || !message.isStreaming || !message.isThinking) {
+      return;
+    }
+    const start = message.createdAt;
+    const tick = () => {
+      setLiveSec(Math.max(1, Math.round((Date.now() - start) / 1000)));
+    };
+    tick();
+    const id = window.setInterval(tick, 300);
+    return () => window.clearInterval(id);
+  }, [message.role, message.isStreaming, message.isThinking, message.createdAt]);
+
+  // Auto-open reasoning timeline while streaming thinking; auto-fold cleanly when answer begins
+  const isActivelyThinking = Boolean(message.isStreaming && message.isThinking && !message.content);
+  const hasReasoningBlock = Boolean(
+    message.thoughts?.trim() ||
+      (message.webSearchQueries && message.webSearchQueries.length > 0) ||
+      isActivelyThinking
+  );
+  const isThinkingOpen =
+    userExpandedOverride !== null ? userExpandedOverride : isActivelyThinking;
+
+  const durationSec = useMemo(() => {
+    if (isActivelyThinking) return liveSec;
+    if (message.thinkingMs && message.thinkingMs > 0) {
+      return Math.max(1, Math.round(message.thinkingMs / 1000));
+    }
+    return 1;
+  }, [isActivelyThinking, liveSec, message.thinkingMs]);
 
   // Delegated click handler for [1] citation pills & code block copy buttons
   useEffect(() => {
@@ -112,7 +140,7 @@ export function MessageBubble({
 
   const handleCopyMessage = async () => {
     try {
-      await navigator.clipboard.writeText(answer || message.content);
+      await navigator.clipboard.writeText(message.content);
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
     } catch {
@@ -128,7 +156,7 @@ export function MessageBubble({
       return;
     }
     window.speechSynthesis.cancel();
-    const plain = (answer || message.content)
+    const plain = message.content
       .replace(/\[\d+\]/g, '')
       .replace(/```[\s\S]*?```/g, 'Code snippet omitted.')
       .replace(/[*_`#>]/g, '');
@@ -212,8 +240,8 @@ export function MessageBubble({
     );
   }
 
-  const showModelWarmup =
-    message.isStreaming && !message.content && modelProgress.status === 'loading';
+  const hasWebSources = Boolean(message.webSources && message.webSources.length > 0);
+  const hasArchiveSources = Boolean(message.sources && message.sources.length > 0);
 
   return (
     <article className="msg-row msg-assistant-row" aria-label="Ask Avi response">
@@ -229,112 +257,126 @@ export function MessageBubble({
           )}
         </div>
 
-        {message.sources && message.sources.length > 0 && (
-          <div className="retrieval-trace">
+        {/* Antigravity / Claude / Gemini Reasoning Timeline */}
+        {hasReasoningBlock && (
+          <div className={`ag-thinking-block ${isActivelyThinking ? 'active' : ''}`}>
             <button
               type="button"
-              className="trace-toggle-btn"
-              onClick={() => setSourcesExpanded((p) => !p)}
-              aria-expanded={sourcesExpanded}
+              className="ag-thinking-header"
+              onClick={() => setUserExpandedOverride(!isThinkingOpen)}
+              aria-expanded={isThinkingOpen}
             >
-              <BookOpen size={13} />
-              <span>
-                Consulted {message.sources.length} dossier{message.sources.length > 1 ? 's' : ''}
-                {message.retrievalMs ? ` · ${message.retrievalMs}ms` : ''}
+              <Sparkles
+                size={13}
+                className={`ag-thinking-icon ${isActivelyThinking ? 'spin-subtle' : ''}`}
+              />
+              <span className="ag-thinking-label">
+                {isActivelyThinking
+                  ? `Thinking · ${durationSec}s`
+                  : `Thought for ${durationSec}s`}
               </span>
-              {sourcesExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+              {isThinkingOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
             </button>
 
-            {sourcesExpanded && (
-              <div className="trace-sources-grid">
-                {message.sources.map((src) => (
-                  <div key={src.entry.id} className="trace-source-card">
-                    <div className="trace-source-head">
-                      <span className="trace-index">[{src.index}]</span>
-                      <span className="trace-cat">{src.entry.category}</span>
-                      <button
-                        type="button"
-                        className="trace-inspect-btn"
-                        onClick={() => onInspectSource(message.sources!, src.index)}
-                      >
-                        Inspect
-                      </button>
+            {isThinkingOpen && (
+              <div className={`ag-thinking-body ${isActivelyThinking ? 'live-scroll' : ''}`}>
+                <div className="ag-timeline">
+                  {message.webSearchQueries && message.webSearchQueries.length > 0 && (
+                    <div className="ag-step">
+                      <span className="ag-step-dot">
+                        <Search size={10} />
+                      </span>
+                      <div className="ag-step-content">
+                        <div className="ag-step-title">Searched the web</div>
+                        <div className="ag-search-chips">
+                          {message.webSearchQueries.map((q, i) => (
+                            <span key={i} className="ag-search-chip">
+                              <Globe size={11} />
+                              <span>{q}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                    <a
-                      href={src.entry.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="trace-title"
-                    >
-                      {src.entry.title} <ExternalLink size={11} />
-                    </a>
-                  </div>
-                ))}
+                  )}
+
+                  {message.sources && message.sources.length > 0 && (
+                    <div className="ag-step">
+                      <span className="ag-step-dot">
+                        <BookOpen size={10} />
+                      </span>
+                      <div className="ag-step-content">
+                        <div className="ag-step-title">
+                          Checked {message.sources.length} relevant Avi reference
+                          {message.sources.length > 1 ? 's' : ''}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {renderedThoughtHtml ? (
+                    <div className="ag-step">
+                      <span className="ag-step-dot dot-pulse" />
+                      <div
+                        className="ag-step-content ag-thought-prose"
+                        dangerouslySetInnerHTML={{ __html: renderedThoughtHtml }}
+                      />
+                    </div>
+                  ) : isActivelyThinking ? (
+                    <div className="ag-step">
+                      <span className="ag-step-dot dot-pulse" />
+                      <div className="ag-step-content ag-thought-placeholder">
+                        Weighing angles and formulating a considered response…
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             )}
           </div>
         )}
 
-        {(thinking || (isThinking && message.isStreaming)) && (
-          <div className="thinking-trace">
-            <button
-              type="button"
-              className={`thinking-toggle-btn ${isThinking && message.isStreaming ? 'live' : ''}`}
-              onClick={() => setThinkingExpanded((p) => !p)}
-              aria-expanded={thinkingExpanded}
-            >
-              <Brain size={13} />
-              <span>{isThinking && message.isStreaming ? 'Thinking…' : 'Thought process'}</span>
-              {thinkingExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-            </button>
-
-            {thinkingExpanded && thinking && (
-              <div className="thinking-body">{thinking}</div>
-            )}
-          </div>
-        )}
-
-        {showModelWarmup ? (
-          <div className="model-warmup-card">
-            <div className="warmup-top">
-              <span className="warmup-title">
-                Initializing In-Browser Neural Engine (WebGPU)…
-              </span>
-              <span className="warmup-pct">{Math.round(modelProgress.progress * 100)}%</span>
-            </div>
-            <div className="warmup-bar-track">
-              <div
-                className="warmup-bar-fill"
-                style={{ width: `${Math.max(4, Math.round(modelProgress.progress * 100))}%` }}
-              />
-            </div>
-            <p className="warmup-sub">
-              {modelProgress.text || 'Caching model shards locally in your browser (one-time download).'}
-            </p>
-            <button type="button" className="warmup-fallback-btn" onClick={onFallbackToInstant}>
-              <Zap size={13} />
-              <span>Use Instant Archive fallback instead</span>
+        {message.needsBackendSetup ? (
+          <div className="setup-prompt-card">
+            <p className="setup-prompt-text">{message.content}</p>
+            <button type="button" className="btn-primary-sm" onClick={onOpenSettings}>
+              <KeyRound size={14} />
+              <span>Connect Gemini 2.5 API / Proxy</span>
             </button>
           </div>
-        ) : message.isStreaming && !answer && !isThinking ? (
+        ) : message.isStreaming && !message.content && !hasReasoningBlock ? (
           <div className="thinking-dots" aria-label="Thinking">
             <span />
             <span />
             <span />
           </div>
-        ) : answer ? (
+        ) : message.content ? (
           <div
             ref={contentRef}
             className={`markdown-prose ${message.isStreaming ? 'streaming-cursor' : ''}`}
-            dangerouslySetInnerHTML={{ __html: renderedHtml }}
+            dangerouslySetInnerHTML={{ __html: renderedAnswerHtml }}
           />
         ) : null}
 
-        {!message.isStreaming && message.content && (
+        {!message.isStreaming && message.content && !message.needsBackendSetup && (
           <>
-            {message.sources && message.sources.length > 0 && (
+            {(hasWebSources || hasArchiveSources) && (
               <div className="inline-sources-strip">
-                {message.sources.map((src) => (
+                {message.webSources?.map((ws) => (
+                  <a
+                    key={ws.url}
+                    href={ws.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="source-chip-btn web-source-chip"
+                    title={ws.url}
+                  >
+                    <Globe size={12} className="web-chip-icon" />
+                    <span className="source-chip-title">{ws.title}</span>
+                  </a>
+                ))}
+
+                {message.sources?.map((src) => (
                   <button
                     key={src.entry.id}
                     type="button"

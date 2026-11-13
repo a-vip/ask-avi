@@ -1,11 +1,6 @@
 export type ThemeMode = 'dark' | 'light';
 
-export type EngineId =
-  | 'instant'
-  | 'webgpu-swift'
-  | 'webgpu-balanced'
-  | 'webgpu-deep'
-  | 'custom-api';
+export type EngineId = 'gemini-flash' | 'gemini-pro' | 'custom-api';
 
 export type VoiceStyle = 'standard' | 'blunt' | 'academic' | 'mentor';
 
@@ -37,6 +32,12 @@ export interface RetrievedSource {
   snippet: string;
 }
 
+export interface WebSource {
+  index: number;
+  title: string;
+  url: string;
+}
+
 export interface AttachedContext {
   id: string;
   title: string;
@@ -48,6 +49,11 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  thoughts?: string;
+  thinkingMs?: number;
+  isThinking?: boolean;
+  webSearchQueries?: string[];
+  webSources?: WebSource[];
   createdAt: number;
   engineUsed?: EngineId;
   modelLabel?: string;
@@ -58,6 +64,7 @@ export interface ChatMessage {
   attachedContext?: AttachedContext;
   feedback?: 'up' | 'down' | null;
   isStreaming?: boolean;
+  needsBackendSetup?: boolean;
   error?: string;
 }
 
@@ -76,16 +83,8 @@ export interface EngineOption {
   shortName: string;
   badge: string;
   description: string;
-  mlcModelId?: string;
-  vramMB?: number;
-  requiresWebGPU: boolean;
-}
-
-export interface ModelLoadProgress {
-  engineId: EngineId;
-  status: 'idle' | 'loading' | 'ready' | 'error';
-  progress: number; // 0..1
-  text: string;
+  geminiModelId?: 'gemini-2.5-flash' | 'gemini-2.5-pro';
+  thinkingBudget?: number;
 }
 
 export interface CustomApiConfig {
@@ -98,6 +97,8 @@ export interface AppSettings {
   theme: ThemeMode;
   engineId: EngineId;
   voiceStyle: VoiceStyle;
-  autoReadAloud: boolean;
+  webSearchEnabled: boolean;
+  geminiApiKey: string;
+  proxyUrl: string;
   customApi: CustomApiConfig;
 }

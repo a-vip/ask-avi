@@ -1,14 +1,16 @@
 import type { AppSettings, ChatThread, ThemeMode } from '../types/chat';
 
 const THREADS_KEY = 'ask_avi_threads_v1';
-const SETTINGS_KEY = 'ask_avi_settings_v2';
+const SETTINGS_KEY = 'ask_avi_settings_v3';
 const THEME_KEY = 'ask_avi_theme';
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
-  engineId: 'webgpu-deep',
+  engineId: 'gemini-flash',
   voiceStyle: 'standard',
-  autoReadAloud: false,
+  webSearchEnabled: true,
+  geminiApiKey: '',
+  proxyUrl: '',
   customApi: {
     endpointUrl: '',
     apiKey: '',

@@ -2,32 +2,30 @@ import {
   BookOpen,
   Check,
   ChevronDown,
-  Cpu,
   Download,
   EyeOff,
+  Globe,
   Moon,
   PanelLeft,
   Settings,
   Sparkles,
   Sun,
-  Zap,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ENGINE_OPTIONS } from '../data/persona';
-import type { EngineId, ModelLoadProgress, ThemeMode } from '../types/chat';
+import type { EngineId, ThemeMode } from '../types/chat';
 
 interface TopBarProps {
   sidebarOpen: boolean;
   theme: ThemeMode;
   engineId: EngineId;
-  cachedModels: Record<string, boolean>;
-  webGpuSupported: boolean | null;
-  modelProgress: ModelLoadProgress;
+  webSearchEnabled: boolean;
   isTemporaryChat: boolean;
   canExport: boolean;
   knowledgeOpen: boolean;
   onOpenSidebar: () => void;
   onSelectEngine: (id: EngineId) => void;
+  onToggleWebSearch: () => void;
   onToggleTheme: () => void;
   onToggleTemporary: () => void;
   onExportChat: () => void;
@@ -39,14 +37,13 @@ export function TopBar({
   sidebarOpen,
   theme,
   engineId,
-  cachedModels,
-  webGpuSupported,
-  modelProgress,
+  webSearchEnabled,
   isTemporaryChat,
   canExport,
   knowledgeOpen,
   onOpenSidebar,
   onSelectEngine,
+  onToggleWebSearch,
   onToggleTheme,
   onToggleTemporary,
   onExportChat,
@@ -91,70 +88,54 @@ export function TopBar({
             aria-expanded={menuOpen}
             aria-haspopup="listbox"
           >
-            {activeOption.requiresWebGPU ? (
-              <Cpu size={15} className="model-pill-icon accent" />
-            ) : (
-              <Zap size={15} className="model-pill-icon accent" />
-            )}
+            <Sparkles size={15} className="model-pill-icon accent" />
             <span className="model-pill-name">{activeOption.shortName}</span>
-            {modelProgress.status === 'loading' && (
-              <span className="model-pill-pct">{Math.round(modelProgress.progress * 100)}%</span>
-            )}
             <ChevronDown size={15} className={`chevron ${menuOpen ? 'open' : ''}`} />
           </button>
 
           {menuOpen && (
-            <div className="model-dropdown" role="listbox" aria-label="Choose AI engine">
+            <div className="model-dropdown" role="listbox" aria-label="Choose Ask Avi model">
               <div className="dropdown-head">
-                <span>Intelligence Engine</span>
-                <span className="webgpu-chip">
-                  {webGpuSupported === true
-                    ? 'WebGPU Ready'
-                    : webGpuSupported === false
-                      ? 'Fallback Mode'
-                      : 'Checking GPU…'}
-                </span>
+                <span>Model</span>
+                <button
+                  type="button"
+                  className={`web-toggle-chip ${webSearchEnabled ? 'active' : ''}`}
+                  onClick={onToggleWebSearch}
+                  title="Toggle live Google Search access"
+                >
+                  <Globe size={11} />
+                  <span>{webSearchEnabled ? 'Web Search On' : 'Web Search Off'}</span>
+                </button>
               </div>
 
               {ENGINE_OPTIONS.map((opt) => {
                 const selected = opt.id === engineId;
-                const isCached = Boolean(cachedModels[opt.id]);
-                const disabledWebGPU = opt.requiresWebGPU && webGpuSupported === false;
-
                 return (
                   <button
                     key={opt.id}
                     type="button"
                     role="option"
                     aria-selected={selected}
-                    className={`model-option ${selected ? 'selected' : ''} ${disabledWebGPU ? 'muted' : ''}`}
+                    className={`model-option ${selected ? 'selected' : ''}`}
                     onClick={() => {
-                      if (opt.id === 'custom-api') {
-                        onSelectEngine(opt.id);
-                        setMenuOpen(false);
-                        onOpenSettings();
-                        return;
-                      }
                       onSelectEngine(opt.id);
                       setMenuOpen(false);
+                      if (opt.id === 'custom-api') {
+                        onOpenSettings();
+                      }
                     }}
                   >
                     <div className="model-option-top">
                       <div className="model-option-title">
-                        {opt.requiresWebGPU ? <Sparkles size={14} /> : <Zap size={14} />}
+                        <Sparkles size={14} />
                         <span>{opt.name}</span>
                       </div>
                       <div className="model-option-badges">
-                        {isCached && <span className="cached-badge">Cached ✓</span>}
                         <span className="size-badge">{opt.badge}</span>
                         {selected && <Check size={14} className="check-icon" />}
                       </div>
                     </div>
-                    <p className="model-option-desc">
-                      {disabledWebGPU
-                        ? `${opt.description} (WebGPU unavailable in this browser — falls back to Instant Archive.)`
-                        : opt.description}
-                    </p>
+                    <p className="model-option-desc">{opt.description}</p>
                   </button>
                 );
               })}
@@ -169,7 +150,7 @@ export function TopBar({
                   }}
                 >
                   <Settings size={13} />
-                  <span>Manage WebGPU Cache &amp; Custom API</span>
+                  <span>API Key &amp; Proxy Settings</span>
                 </button>
               </div>
             </div>
@@ -211,7 +192,7 @@ export function TopBar({
           type="button"
           className={`topbar-dossiers-btn ${knowledgeOpen ? 'active' : ''}`}
           onClick={onToggleKnowledge}
-          title="Open Dossiers & Sources Panel"
+          title="Open Avi Dossiers Explorer"
         >
           <BookOpen size={15} />
           <span className="hide-xs">Dossiers</span>

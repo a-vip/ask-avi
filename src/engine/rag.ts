@@ -13,7 +13,8 @@ const STOP_WORDS = new Set([
   'their', 'them', 'then', 'there', 'these', 'they', 'this', 'those', 'to',
   'too', 'up', 'us', 'very', 'was', 'we', 'were', 'what', 'when', 'where',
   'which', 'who', 'why', 'will', 'with', 'would', 'you', 'your', 'about',
-  'avi', 'perera',
+  'avi', 'perera', 'hello', 'hey', 'hiya', 'thanks', 'thank', 'please',
+  'okay', 'ok', 'yes', 'sure', 'cool', 'great', 'nice', 'think', 'good',
 ]);
 
 const QUERY_EXPANSIONS: Array<[RegExp, string[]]> = [
@@ -116,7 +117,7 @@ class KnowledgeIndex {
   ): { sources: RetrievedSource[]; elapsedMs: number } {
     const start = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const topK = options?.topK ?? 3;
-    const minScore = options?.minScore ?? 2.6;
+    const minScore = options?.minScore ?? 3.6;
     const rawTokens = tokenize(query);
     const queryTokens = normalizeQueryTokens(
       options?.conversationHint && rawTokens.length <= 4

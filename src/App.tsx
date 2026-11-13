@@ -6,8 +6,11 @@ import { SettingsModal } from './components/SettingsModal';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { WelcomeScreen } from './components/WelcomeScreen';
-import { ENGINE_OPTIONS } from './data/persona';
-import { llmService } from './engine/llmService';
+import {
+  BackendNotConfiguredError,
+  llmService,
+  resolveEffectiveProxyUrl,
+} from './engine/llmService';
 import type {
   AppSettings,
   AttachedContext,
@@ -15,7 +18,6 @@ import type {
   ChatThread,
   EngineId,
   KnowledgeEntry,
-  ModelLoadProgress,
   RetrievedSource,
   VoiceStyle,
 } from './types/chat';
@@ -61,21 +63,18 @@ export default function App() {
   const [drawerFocusIdx, setDrawerFocusIdx] = useState<number | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const [webGpuSupported, setWebGpuSupported] = useState<boolean | null>(null);
-  const [webGpuReason, setWebGpuReason] = useState<string | undefined>(undefined);
-  const [cachedModels, setCachedModels] = useState<Record<string, boolean>>({});
-  const [modelProgress, setModelProgress] = useState<ModelLoadProgress>(() => ({
-    engineId: settings.engineId,
-    status: 'idle',
-    progress: 0,
-    text: '',
-  }));
-
   const abortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
+
+  const backendConnected = useMemo(() => {
+    if (settings.engineId === 'custom-api') {
+      return Boolean(settings.customApi.endpointUrl.trim() && settings.customApi.modelName.trim());
+    }
+    return Boolean(settings.geminiApiKey.trim() || resolveEffectiveProxyUrl(settings.proxyUrl));
+  }, [settings]);
 
   const activeThread = useMemo(() => {
     if (isTemporaryChat) return tempThread;
@@ -95,42 +94,10 @@ export default function App() {
     saveThreads(threads);
   }, [threads]);
 
-  // Detect WebGPU & model caches on boot; auto-warm cached model or fallback gracefully
+  // Signal parent iframe readiness + listen for host theme transitions
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const gpu = await llmService.detectWebGPU();
-      const caches = await llmService.getCachedModels();
-      if (!mounted) return;
-      setWebGpuSupported(gpu.supported);
-      setWebGpuReason(gpu.reason);
-      setCachedModels(caches);
-      postParentBridgeEvent('ready', { webgpu: gpu.supported });
+    postParentBridgeEvent('ready', { engine: settings.engineId });
 
-      const activeOpt = ENGINE_OPTIONS.find((o) => o.id === settings.engineId);
-      if (!gpu.supported && activeOpt?.requiresWebGPU) {
-        setSettings((prev) => ({ ...prev, engineId: 'instant' }));
-      } else if (gpu.supported && activeOpt?.requiresWebGPU && caches[settings.engineId]) {
-        void llmService
-          .loadWebGPUModel(settings.engineId, (p) => {
-            if (!mounted) return;
-            setModelProgress(p);
-            if (p.status === 'ready') {
-              setCachedModels((prev) => ({ ...prev, [p.engineId]: true }));
-            }
-          })
-          .catch(() => {
-            // Ignored on silent background warmup; interactive path surfaces errors if needed
-          });
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  // Responsive check & parent theme postMessage listener
-  useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth <= 860);
     window.addEventListener('resize', onResize);
 
@@ -239,26 +206,28 @@ export default function App() {
           history: historyBeforeQuery,
           engineId: engineToUse,
           voiceStyle: settings.voiceStyle,
+          webSearchEnabled: settings.webSearchEnabled,
+          geminiApiKey: settings.geminiApiKey,
+          proxyUrl: settings.proxyUrl,
           attachedContext: attached ?? undefined,
           customApi: settings.customApi,
           signal: controller.signal,
-          onSources: (sources, elapsedMs) => {
+          onUpdate: (update) => {
             updateThreadMessages(threadId, (msgs) =>
               msgs.map((m) =>
-                m.id === assistantMsgId ? { ...m, sources, retrievalMs: elapsedMs } : m
+                m.id === assistantMsgId
+                  ? {
+                      ...m,
+                      content: update.content,
+                      thoughts: update.thoughts,
+                      isThinking: update.isThinking,
+                      thinkingMs: update.thinkingMs,
+                      webSearchQueries: update.webSearchQueries,
+                      webSources: update.webSources,
+                    }
+                  : m
               )
             );
-          },
-          onToken: (partial) => {
-            updateThreadMessages(threadId, (msgs) =>
-              msgs.map((m) => (m.id === assistantMsgId ? { ...m, content: partial } : m))
-            );
-          },
-          onModelProgress: (progress) => {
-            setModelProgress(progress);
-            if (progress.status === 'ready') {
-              setCachedModels((prev) => ({ ...prev, [progress.engineId]: true }));
-            }
           },
         });
 
@@ -267,7 +236,12 @@ export default function App() {
             m.id === assistantMsgId
               ? {
                   ...m,
-                  content: result.markdown,
+                  content: result.content,
+                  thoughts: result.thoughts,
+                  isThinking: false,
+                  thinkingMs: result.thinkingMs,
+                  webSearchQueries: result.webSearchQueries,
+                  webSources: result.webSources,
                   engineUsed: result.engineUsed,
                   modelLabel: result.modelLabel,
                   sources: result.sources,
@@ -280,13 +254,22 @@ export default function App() {
         );
       } catch (err) {
         const isAbort = err instanceof DOMException && err.name === 'AbortError';
+        const needsSetup = err instanceof BackendNotConfiguredError;
+        const messageText = isAbort
+          ? '*Generation stopped.*'
+          : err instanceof Error
+            ? err.message
+            : 'Unable to reach Gemini API. Please check your connection or API settings.';
+
         updateThreadMessages(threadId, (msgs) =>
           msgs.map((m) =>
             m.id === assistantMsgId
               ? {
                   ...m,
-                  content: m.content || (isAbort ? '*Generation stopped.*' : 'Something interrupted the response. Please retry.'),
+                  content: m.content || messageText,
+                  isThinking: false,
                   isStreaming: false,
+                  needsBackendSetup: needsSetup,
                 }
               : m
           )
@@ -296,7 +279,15 @@ export default function App() {
         setIsStreaming(false);
       }
     },
-    [settings.engineId, settings.voiceStyle, settings.customApi, updateThreadMessages]
+    [
+      settings.engineId,
+      settings.voiceStyle,
+      settings.webSearchEnabled,
+      settings.geminiApiKey,
+      settings.proxyUrl,
+      settings.customApi,
+      updateThreadMessages,
+    ]
   );
 
   const handleSubmitPrompt = useCallback(
@@ -317,6 +308,7 @@ export default function App() {
         content: '',
         createdAt: Date.now(),
         voiceStyle: settings.voiceStyle,
+        isThinking: true,
         isStreaming: true,
       };
 
@@ -373,12 +365,12 @@ export default function App() {
     ]
   );
 
-  // Auto-submit ?prompt= query parameter on initial visit if present
+  // Auto-submit ?q= or ?prompt= query parameter on initial visit if present
   const urlPromptConsumedRef = useRef(false);
   useEffect(() => {
     if (urlPromptConsumedRef.current) return;
     const params = new URLSearchParams(window.location.search);
-    const p = params.get('prompt');
+    const p = params.get('prompt') || params.get('q');
     if (p && p.trim()) {
       urlPromptConsumedRef.current = true;
       void handleSubmitPrompt(p.trim());
@@ -387,32 +379,6 @@ export default function App() {
 
   const handleStop = () => {
     abortRef.current?.abort();
-    void llmService.interrupt();
-  };
-
-  const handleFallbackToInstant = async () => {
-    handleStop();
-    setSettings((prev) => ({ ...prev, engineId: 'instant' }));
-    if (!activeThread || activeThread.messages.length === 0) return;
-    const lastUser = [...activeThread.messages].reverse().find((m) => m.role === 'user');
-    const lastAssistant = [...activeThread.messages].reverse().find((m) => m.role === 'assistant');
-    if (!lastUser || !lastAssistant) return;
-
-    const assistantIdx = activeThread.messages.findIndex((m) => m.id === lastAssistant.id);
-    const historyBefore = activeThread.messages.slice(0, Math.max(0, assistantIdx - 1));
-    updateThreadMessages(activeThread.id, (msgs) =>
-      msgs.map((m) =>
-        m.id === lastAssistant.id ? { ...m, content: '', isStreaming: true } : m
-      )
-    );
-    await runAssistantTurn(
-      activeThread.id,
-      historyBefore,
-      lastUser.content,
-      lastAssistant.id,
-      'instant',
-      lastUser.attachedContext
-    );
   };
 
   const handleNewChat = () => {
@@ -438,6 +404,7 @@ export default function App() {
       content: '',
       createdAt: Date.now(),
       voiceStyle: settings.voiceStyle,
+      isThinking: true,
       isStreaming: true,
     };
 
@@ -479,6 +446,7 @@ export default function App() {
         content: '',
         createdAt: Date.now(),
         voiceStyle: settings.voiceStyle,
+        isThinking: true,
         isStreaming: true,
       })
     );
@@ -491,27 +459,6 @@ export default function App() {
       undefined,
       userMsg.attachedContext
     );
-  };
-
-  const handlePreloadWebGPU = async (engineId: EngineId) => {
-    try {
-      await llmService.loadWebGPUModel(engineId, (p) => {
-        setModelProgress(p);
-        if (p.status === 'ready') {
-          setCachedModels((prev) => ({ ...prev, [p.engineId]: true }));
-        }
-      });
-    } catch {
-      // Progress state already updates with error info
-    }
-  };
-
-  const handleSelectEngine = (id: EngineId) => {
-    setSettings((prev) => ({ ...prev, engineId: id }));
-    const opt = ENGINE_OPTIONS.find((o) => o.id === id);
-    if (opt?.requiresWebGPU && webGpuSupported && cachedModels[id]) {
-      void handlePreloadWebGPU(id);
-    }
   };
 
   const handleExportChat = () => {
@@ -540,7 +487,7 @@ export default function App() {
       content: `${entry.summary}\n\n${entry.chunks.join('\n\n')}`,
       sourceUrl: entry.url,
     });
-    setInputValue(`Explain the core argument in "${entry.title}" and why it matters.`);
+    setInputValue(`Let’s discuss your argument in "${entry.title}" and how it applies right now.`);
     if (isMobile) setKnowledgeOpen(false);
     setTimeout(() => inputRef.current?.focus(), 50);
   };
@@ -574,8 +521,7 @@ export default function App() {
         threads={threads}
         activeThreadId={activeThread?.id ?? null}
         activeEngineId={settings.engineId}
-        modelProgress={modelProgress}
-        webGpuSupported={webGpuSupported}
+        backendConnected={backendConnected}
         onCloseMobile={() => setSidebarOpen(false)}
         onToggleCollapse={() => setSidebarOpen(false)}
         onNewChat={handleNewChat}
@@ -609,14 +555,15 @@ export default function App() {
           sidebarOpen={sidebarOpen}
           theme={settings.theme}
           engineId={settings.engineId}
-          cachedModels={cachedModels}
-          webGpuSupported={webGpuSupported}
-          modelProgress={modelProgress}
+          webSearchEnabled={settings.webSearchEnabled}
           isTemporaryChat={isTemporaryChat}
           canExport={hasMessages}
           knowledgeOpen={knowledgeOpen}
           onOpenSidebar={() => setSidebarOpen(true)}
-          onSelectEngine={handleSelectEngine}
+          onSelectEngine={(engineId) => setSettings((prev) => ({ ...prev, engineId }))}
+          onToggleWebSearch={() =>
+            setSettings((prev) => ({ ...prev, webSearchEnabled: !prev.webSearchEnabled }))
+          }
           onToggleTheme={() =>
             setSettings((prev) => ({
               ...prev,
@@ -660,7 +607,6 @@ export default function App() {
                 setDrawerTab('archive');
                 setKnowledgeOpen(true);
               }}
-              modelProgress={modelProgress}
               inputRef={inputRef}
             />
           ) : (
@@ -670,7 +616,6 @@ export default function App() {
                   key={msg.id}
                   message={msg}
                   isLastAssistant={msg.id === lastAssistantId}
-                  modelProgress={modelProgress}
                   onEditUserMessage={handleEditUserMessage}
                   onRegenerate={handleRegenerate}
                   onFollowUpClick={(prompt) => handleSubmitPrompt(prompt)}
@@ -680,7 +625,7 @@ export default function App() {
                       msgs.map((m) => (m.id === msgId ? { ...m, feedback: vote } : m))
                     )
                   }
-                  onFallbackToInstant={handleFallbackToInstant}
+                  onOpenSettings={() => setSettingsOpen(true)}
                 />
               ))}
               <div ref={messagesEndRef} className="scroll-anchor" />
@@ -725,17 +670,8 @@ export default function App() {
       <SettingsModal
         isOpen={settingsOpen}
         settings={settings}
-        webGpuSupported={webGpuSupported}
-        webGpuReason={webGpuReason}
-        cachedModels={cachedModels}
-        modelProgress={modelProgress}
         onClose={() => setSettingsOpen(false)}
         onUpdateSettings={setSettings}
-        onPreloadModel={handlePreloadWebGPU}
-        onClearModelCache={async (id) => {
-          await llmService.clearCachedModel(id);
-          setCachedModels((prev) => ({ ...prev, [id]: false }));
-        }}
       />
     </div>
   );

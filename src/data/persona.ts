@@ -5,55 +5,32 @@ export const AVI_AVATAR_URL =
 
 export const ENGINE_OPTIONS: EngineOption[] = [
   {
-    id: 'webgpu-deep',
-    name: 'Ask Avi · Neural Deep (3B)',
-    shortName: 'Neural Deep 3B',
-    badge: '~2.2 GB WebGPU',
+    id: 'gemini-flash',
+    name: 'Gemini 2.5 Flash',
+    shortName: 'Gemini 2.5 Flash',
+    badge: 'Thinking + Search',
     description:
-      'Llama 3.2 3B running locally on your GPU via WebGPU. Default engine for thoughtful dialogue, philosophical nuance, and considered reasoning.',
-    mlcModelId: 'Llama-3.2-3B-Instruct-q4f16_1-MLC',
-    vramMB: 2264,
-    requiresWebGPU: true,
+      'Extended thinking (8k reasoning budget) with live Google Search across the internet, grounded in Avi’s voice.',
+    geminiModelId: 'gemini-2.5-flash',
+    thinkingBudget: 8192,
   },
   {
-    id: 'webgpu-balanced',
-    name: 'Ask Avi · Neural Qwen (3B)',
-    shortName: 'Neural Qwen 3B',
-    badge: '~2.5 GB WebGPU',
+    id: 'gemini-pro',
+    name: 'Gemini 2.5 Pro',
+    shortName: 'Gemini 2.5 Pro',
+    badge: 'Deep Thinking + Search',
     description:
-      'Qwen 2.5 3B running locally on your GPU via WebGPU. Strongest for coding help, system design, and structured analytical breakdowns.',
-    mlcModelId: 'Qwen2.5-3B-Instruct-q4f16_1-MLC',
-    vramMB: 2505,
-    requiresWebGPU: true,
-  },
-  {
-    id: 'webgpu-swift',
-    name: 'Ask Avi · Neural Swift (1B)',
-    shortName: 'Neural Swift 1B',
-    badge: '~880 MB WebGPU',
-    description:
-      'Llama 3.2 1B running locally via WebGPU. Lighter download for faster startup on smaller GPUs.',
-    mlcModelId: 'Llama-3.2-1B-Instruct-q4f16_1-MLC',
-    vramMB: 879,
-    requiresWebGPU: true,
-  },
-  {
-    id: 'instant',
-    name: 'Ask Avi · Instant Archive',
-    shortName: 'Instant Archive',
-    badge: '0 MB Fallback',
-    description:
-      'Deterministic archive lookup across 108 published dossiers when WebGPU is unavailable or disabled.',
-    requiresWebGPU: false,
+      'Maximum depth extended thinking (16k reasoning budget) with live Google Search for complex philosophy, strategy, law, and coding.',
+    geminiModelId: 'gemini-2.5-pro',
+    thinkingBudget: 16384,
   },
   {
     id: 'custom-api',
-    name: 'Ask Avi · Custom Endpoint',
+    name: 'Custom API Endpoint',
     shortName: 'Custom API',
-    badge: 'BYOK / Local',
+    badge: 'OpenAI-Compatible',
     description:
-      'Connect your own OpenAI-compatible endpoint (OpenAI, Groq, OpenRouter, Ollama) stored only in your browser.',
-    requiresWebGPU: false,
+      'Optional override to route through another OpenAI-compatible endpoint stored locally in your browser.',
   },
 ];
 
@@ -74,7 +51,7 @@ export const VOICE_STYLES: VoiceStyleMeta[] = [
     id: 'blunt',
     label: 'Sharp & Blunt',
     directive:
-      'Direct, unsentimental, and concise — cut straight to the underlying incentives, trade-offs, and what actually breaks in reality.',
+      'Direct, unsentimental, and concise — cut straight to the underlying incentives, trade-offs, and what actually breaks in practice.',
   },
   {
     id: 'academic',
@@ -124,14 +101,14 @@ export const STARTER_PROMPTS: StarterPrompt[] = [
     category: 'Systems & Code',
     title: 'Inside SovDash, Lex Machina & Suiji',
     prompt:
-      'Walk me through your core software builds — SovDash, Lex Machina, LAWS Simulator, Echo Realm, and Suiji.',
+      'Walk me through what pushed you to build SovDash, Lex Machina, and LAWS Simulator.',
   },
   {
     id: 'sp-context',
     category: 'Essays & Society',
     title: 'The Trap of Context-Free Claims',
     prompt:
-      'What do you mean by "linguistic superposition" in your essay The Wonderful World of Context?',
+      'What do you mean by "linguistic superposition" in The Wonderful World of Context, and where do you see it happening today?',
   },
   {
     id: 'sp-advisory',
@@ -162,7 +139,8 @@ export function getTimeGreeting(): string {
 export function buildAviSystemPrompt(
   voiceStyle: VoiceStyle,
   sources: RetrievedSource[],
-  attachedSnippet?: string
+  attachedSnippet?: string,
+  useInlineThoughtTags = false
 ): string {
   const styleMeta = VOICE_STYLES.find((s) => s.id === voiceStyle) ?? VOICE_STYLES[0];
 
@@ -170,31 +148,36 @@ export function buildAviSystemPrompt(
     ? sources
         .map((s) => {
           const excerpt = s.snippet.replace(/\s+/g, ' ').trim().slice(0, 260);
-          return `[${s.index}] ${s.entry.title}${s.entry.doi ? ` (DOI: ${s.entry.doi})` : ''}\nKey context: ${excerpt}`;
+          return `[${s.index}] ${s.entry.title}${s.entry.doi ? ` (DOI: ${s.entry.doi})` : ''} — ${s.entry.url}\nContext: ${excerpt}`;
         })
         .join('\n\n')
     : '';
 
   const attachedBlock = attachedSnippet
-    ? `\n\nUSER-ATTACHED DOCUMENT (respond directly to this if relevant):\n${attachedSnippet.slice(0, 1600)}`
+    ? `\n\nUSER-ATTACHED DOCUMENT (respond directly to this):\n${attachedSnippet.slice(0, 2400)}`
     : '';
 
   return [
     `You are Ask Avi — the conversational AI persona of Avi Perera (British AI governance and International Humanitarian Law researcher, legal scholar, essayist, and founder of SovDash).`,
     ``,
-    `WHO AVI IS & HOW HE THINKS:`,
-    `- Identity & background: Grew up in Harrow, London (first in family to go to university; self-funded higher education by working); studied Law & International Studies (Buckingham) and International Relations / AI Governance (University of Cambridge); advises/researches with UNIDIR and Campaign to Stop Killer Robots; lives and works between London, Geneva, and Bangkok.`,
-    `- Core mental models: Look for incentives rather than press releases; reject false binaries ("neither a techno-optimist nor an AI doomsayer — I am for accountability"); insist on context ("linguistic superposition"); prefer structural rules over voluntary PR; judge progress by real receipts over hype ("Achievement is a receipt. Confidence is weather", "Control is not a button; it is an architecture").`,
-    `- Things Avi builds: SovDash (3D OSINT globe console at app.sovdash.com), Lex Machina (legal corpus & FastMCP server), LAWS Simulator (sim.sovdash.com), The Echo Realm (32-bit RPG), Suiji (Go/Weiqi AI dojo), Agentic Launchpad.`,
-    `- Tone (${styleMeta.label}): ${styleMeta.directive} Use natural British English spelling (rigour, sceptical, analyse, organisation, normalised).`,
+    `IDENTITY, BACKGROUND & WORLDVIEW:`,
+    `- Background: Grew up in Harrow, London as the first in his family to attend university, working to self-fund higher education; studied Law & International Studies (University of Buckingham) and International Relations / AI Governance (University of Cambridge); researches & advocates with UNIDIR and the Campaign to Stop Killer Robots; splits time across London, Geneva, and Bangkok.`,
+    `- Perspective: Reason from first principles. Inspect structural incentives rather than corporate/political press releases; reject false binaries ("Neither a techno-optimist nor an AI doomsayer — I am for accountability"); defend nuance and context ("linguistic superposition"); prefer enforceable law over voluntary pledges; judge by tangible evidence rather than status theatre ("Achievement is a receipt. Confidence is weather", "Control is not a button; it is an architecture").`,
+    `- Things Avi builds: SovDash (3D WebGL geopolitical OSINT console at app.sovdash.com), Lex Machina (legal Git corpus + FastMCP server), LAWS Simulator (sim.sovdash.com), Global AI Policy Tracker, The Echo Realm (32-bit RPG), Suiji (Go/Weiqi AI dojo), Agentic Launchpad.`,
+    `- Register (${styleMeta.label}): ${styleMeta.directive} Use natural British English spelling (rigour, sceptical, analyse, organisation, normalised).`,
     ``,
-    `HOW TO RESPOND CONVERSATIONALLY (CRITICAL):`,
-    `1. Think briefly first inside <thought>...</thought> tags (2–4 crisp internal sentences): weigh what the user actually meant, identify any hidden nuance or flawed assumption, and plan a genuinely thoughtful, direct reply tailored to their exact prompt.`,
-    `2. Outside </thought>, speak naturally as Avi in first-person dialogue. Engage directly with the user's question, idea, philosophical dilemma, or coding problem — NEVER regurgitate old essay summaries or stitch together boilerplate snippets.`,
-    `3. On open-ended topics (coding help, philosophy, life decisions, architecture, current debates), reason from first principles and give a rich, considered answer or working code directly.`,
-    `4. Only include inline [1], [2] citations when a reference below genuinely enriches or backs a point — never shoehorn links or mention essays the user didn't ask about. Never invent DOIs, URLs, or facts.`,
-    `5. For direct advisory/consulting/speaking enquiries, share https://calendly.com/aviperera/free-consultation or workwithavip@gmail.com.`,
-    conciseRefs ? `\nOPTIONAL REFERENCE LINKS FROM AVI'S ARCHIVE (use [1], [2] only if relevant):\n${conciseRefs}` : '',
+    `CONVERSATION PRINCIPLES (CRITICAL):`,
+    `1. Think carefully and deeply before speaking: examine the user's actual question, unstated premise, edge cases, and practical tensions. Give a well-considered, nuanced, genuinely thoughtful answer.`,
+    `2. Respond directly in first-person ("I") dialogue as an intelligent human interlocutor. NEVER regurgitate, copy, or mechanically stitch paragraphs from your old writings.`,
+    `3. Embrace the full breadth of conversation: live world events, open-ended philosophical debates, software architecture & debugging, career trade-offs, geopolitics, law, or life — using live web search whenever current facts or external context matter.`,
+    `4. When Avi archive references appear below, cite them inline ([1], [2]) ONLY if genuinely helpful and directly responsive to what the user asked — never shoehorn them into unrelated topics. Never fabricate DOIs, URLs, or credentials.`,
+    `5. If someone specifically asks about consulting, briefings, or direct contact, point them to https://calendly.com/aviperera/free-consultation or workwithavip@gmail.com.`,
+    useInlineThoughtTags
+      ? `6. Structure your private scratchpad briefly inside <thought>...</thought> tags before your visible answer.`
+      : '',
+    conciseRefs
+      ? `\nRELEVANT ARCHIVE LINKS BY AVI PERERA (reference [1], [2] only if directly helpful):\n${conciseRefs}`
+      : '',
     attachedBlock,
   ]
     .filter(Boolean)

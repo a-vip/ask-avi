@@ -1,36 +1,26 @@
-import { Check, Code2, Copy, Cpu, KeyRound, Trash2, X } from 'lucide-react';
+import { Check, Code2, Copy, Globe, KeyRound, Server, Sparkles, X } from 'lucide-react';
 import { useState } from 'react';
-import { ENGINE_OPTIONS } from '../data/persona';
-import type { AppSettings, EngineId, ModelLoadProgress } from '../types/chat';
+import { resolveEffectiveProxyUrl } from '../engine/llmService';
+import type { AppSettings } from '../types/chat';
 
 interface SettingsModalProps {
   isOpen: boolean;
   settings: AppSettings;
-  webGpuSupported: boolean | null;
-  webGpuReason?: string;
-  cachedModels: Record<string, boolean>;
-  modelProgress: ModelLoadProgress;
   onClose: () => void;
   onUpdateSettings: (next: AppSettings) => void;
-  onPreloadModel: (engineId: EngineId) => void;
-  onClearModelCache: (engineId: EngineId) => void;
 }
 
 export function SettingsModal({
   isOpen,
   settings,
-  webGpuSupported,
-  webGpuReason,
-  cachedModels,
-  modelProgress,
   onClose,
   onUpdateSettings,
-  onPreloadModel,
-  onClearModelCache,
 }: SettingsModalProps) {
   const [copiedEmbed, setCopiedEmbed] = useState(false);
 
   if (!isOpen) return null;
+
+  const detectedProxy = resolveEffectiveProxyUrl(settings.proxyUrl);
 
   const embedCode = `<iframe
   src="https://a-vip.github.io/ask-avi/?embed=1"
@@ -51,10 +41,10 @@ export function SettingsModal({
   };
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Engine and Settings">
+    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Ask Avi Settings">
       <div className="modal-card">
         <div className="modal-head">
-          <h2>Ask Avi · Engine &amp; Settings</h2>
+          <h2>Ask Avi · Settings</h2>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Close settings">
             <X size={18} />
           </button>
@@ -63,69 +53,89 @@ export function SettingsModal({
         <div className="modal-body">
           <section className="settings-section">
             <div className="settings-section-title">
-              <Cpu size={16} />
-              <h3>In-Browser WebGPU Neural Models</h3>
+              <Sparkles size={16} />
+              <h3>Gemini 2.5 Thinking &amp; Live Web Search</h3>
             </div>
             <p className="settings-desc">
-              {webGpuSupported
-                ? 'Your browser supports WebGPU. Neural weights download directly into browser CacheStorage once and run 100% client-side with zero API keys.'
-                : webGpuReason || 'WebGPU is unavailable in this browser; Instant Sovereign Archive Mode runs seamlessly everywhere.'}
+              Powers open-ended philosophical, technical, and current-affairs conversations in Avi&apos;s voice using extended reasoning and Google Search grounding.
             </p>
 
-            <div className="model-cache-list">
-              {ENGINE_OPTIONS.filter((o) => o.requiresWebGPU).map((opt) => {
-                const cached = Boolean(cachedModels[opt.id]);
-                const isLoading =
-                  modelProgress.status === 'loading' && modelProgress.engineId === opt.id;
+            <div className="settings-form-grid">
+              <label>
+                <span>
+                  Gemini API Key (saved only in your browser — get a free key at{' '}
+                  <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">
+                    Google AI Studio
+                  </a>
+                  )
+                </span>
+                <input
+                  type="password"
+                  value={settings.geminiApiKey}
+                  placeholder="AIza..."
+                  onChange={(e) =>
+                    onUpdateSettings({
+                      ...settings,
+                      geminiApiKey: e.target.value,
+                    })
+                  }
+                />
+              </label>
 
-                return (
-                  <div key={opt.id} className="cache-row">
-                    <div>
-                      <strong>{opt.shortName}</strong>
-                      <span>
-                        {opt.badge} · {cached ? 'Cached locally ✓' : 'Not cached yet'}
-                      </span>
-                    </div>
-                    <div className="cache-row-actions">
-                      {isLoading ? (
-                        <span className="loading-inline">
-                          {Math.round(modelProgress.progress * 100)}%
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="btn-secondary-sm"
-                          disabled={!webGpuSupported}
-                          onClick={() => onPreloadModel(opt.id)}
-                        >
-                          {cached ? 'Load' : 'Download'}
-                        </button>
-                      )}
-                      {cached && (
-                        <button
-                          type="button"
-                          className="mini-icon-btn danger"
-                          onClick={() => onClearModelCache(opt.id)}
-                          title="Delete cached model"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+              <label className="settings-toggle-row">
+                <span className="toggle-label-wrap">
+                  <Globe size={14} />
+                  <span>Live Google Search Grounding (entire internet access)</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={settings.webSearchEnabled}
+                  onChange={(e) =>
+                    onUpdateSettings({
+                      ...settings,
+                      webSearchEnabled: e.target.checked,
+                    })
+                  }
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="settings-section">
+            <div className="settings-section-title">
+              <Server size={16} />
+              <h3>Public Serverless Proxy (For aviperera.com Visitors)</h3>
+            </div>
+            <p className="settings-desc">
+              For zero-key public access on <code>aviperera.com</code> and GitHub Pages, deploy the included{' '}
+              <code>api/chat.ts</code> (Vercel) or <code>worker/src/index.ts</code> (Cloudflare Workers) with your{' '}
+              <code>GEMINI_API_KEY</code> env variable and set <code>ASK_AVI_API_ENDPOINT</code> in GitHub repository variables (or override below).
+            </p>
+            <div className="settings-form-grid">
+              <label>
+                <span>Proxy Endpoint URL {detectedProxy ? `(active: ${detectedProxy})` : ''}</span>
+                <input
+                  type="url"
+                  value={settings.proxyUrl}
+                  placeholder="https://ask-avi-api.vercel.app/api/chat"
+                  onChange={(e) =>
+                    onUpdateSettings({
+                      ...settings,
+                      proxyUrl: e.target.value,
+                    })
+                  }
+                />
+              </label>
             </div>
           </section>
 
           <section className="settings-section">
             <div className="settings-section-title">
               <KeyRound size={16} />
-              <h3>Optional Custom API / Local Ollama (BYOK)</h3>
+              <h3>Optional Custom OpenAI-Compatible Endpoint</h3>
             </div>
             <p className="settings-desc">
-              Optional for power users: connect an OpenAI-compatible endpoint (stored only in your browser&apos;s{' '}
-              <code>localStorage</code>) when selecting &ldquo;Custom API&rdquo; in the top model switcher.
+              Optional override when &ldquo;Custom API&rdquo; is selected in the model switcher.
             </p>
             <div className="settings-form-grid">
               <label>
@@ -147,7 +157,7 @@ export function SettingsModal({
                 <input
                   type="text"
                   value={settings.customApi.modelName}
-                  placeholder="gpt-4o-mini / llama3.2 / gemini-2.5-flash"
+                  placeholder="gpt-4o / claude-sonnet-4-5 / deepseek-reasoner"
                   onChange={(e) =>
                     onUpdateSettings({
                       ...settings,
@@ -157,7 +167,7 @@ export function SettingsModal({
                 />
               </label>
               <label>
-                <span>API Key (optional for local Ollama)</span>
+                <span>API Key</span>
                 <input
                   type="password"
                   value={settings.customApi.apiKey}

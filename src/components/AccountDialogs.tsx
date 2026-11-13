@@ -1,11 +1,34 @@
-import { BookOpen, ExternalLink, HelpCircle, Info, KeyRound, Mail, UserCheck, X } from 'lucide-react';
-import { useState } from 'react';
+import {
+  AlertCircle,
+  BookOpen,
+  ExternalLink,
+  HelpCircle,
+  Info,
+  KeyRound,
+  Mail,
+  ShieldCheck,
+  UserCheck,
+  X,
+} from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { VERIFIED_LINKS } from '../data/persona';
 import type { UserProfile } from '../types/chat';
+import {
+  ADMIN_EMAIL,
+  isVerifiedAdmin,
+  loadGoogleIdentityScript,
+  resolveEffectiveAuthUrl,
+  signInWithEmail,
+  signInWithGoogleCredential,
+  signUpWithEmail,
+  type AuthConfigResponse,
+} from '../utils/authClient';
 
 interface SignInModalProps {
   isOpen: boolean;
   currentProfile: UserProfile | null;
+  authConfig?: AuthConfigResponse | null;
+  proxyUrl?: string;
   onClose: () => void;
   onSignIn: (profile: UserProfile) => void;
   onSignOut: () => void;
@@ -14,85 +37,406 @@ interface SignInModalProps {
 export function SignInModal({
   isOpen,
   currentProfile,
+  authConfig = null,
+  proxyUrl,
   onClose,
   onSignIn,
   onSignOut,
 }: SignInModalProps) {
-  const [name, setName] = useState(currentProfile?.name ?? '');
-  const [email, setEmail] = useState(currentProfile?.email ?? '');
+  const [authTab, setAuthTab] = useState<'signin' | 'signup'>('signin');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [adminPasscode, setAdminPasscode] = useState('');
+  const [marketingOptIn, setMarketingOptIn] = useState(true);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [googleLoadFailed, setGoogleLoadFailed] = useState(false);
+
+  const googleBtnRef = useRef<HTMLDivElement>(null);
+
+  const hasBackendAuth = Boolean(resolveEffectiveAuthUrl(proxyUrl));
+  const needsAdminPasscode = email.trim().toLowerCase() === ADMIN_EMAIL;
+  const googleClientId = authConfig?.googleClientId?.trim() || '';
+
+  useEffect(() => {
+    if (!isOpen) {
+      setErrorMsg('');
+      setPassword('');
+      setAdminPasscode('');
+      return;
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || currentProfile || !googleClientId) return;
+    let cancelled = false;
+    setGoogleLoadFailed(false);
+
+    loadGoogleIdentityScript()
+      .then(() => {
+        if (cancelled || !googleBtnRef.current) return;
+        const gWindow = window as unknown as {
+          google?: {
+            accounts?: {
+              id?: {
+                initialize: (cfg: {
+                  client_id: string;
+                  callback: (res: { credential?: string }) => void;
+                }) => void;
+                renderButton: (
+                  parent: HTMLElement,
+                  options: Record<string, string | number>
+                ) => void;
+              };
+            };
+          };
+        };
+        const gis = gWindow.google?.accounts?.id;
+        if (!gis) return;
+
+        gis.initialize({
+          client_id: googleClientId,
+          callback: async (response: { credential?: string }) => {
+            if (!response.credential || cancelled) return;
+            setSubmitting(true);
+            setErrorMsg('');
+            try {
+              const verified = await signInWithGoogleCredential(
+                response.credential,
+                marketingOptIn,
+                proxyUrl
+              );
+              onSignIn(verified);
+              onClose();
+            } catch (err) {
+              setErrorMsg(
+                err instanceof Error ? err.message : 'Google Sign-In failed.'
+              );
+            } finally {
+              setSubmitting(false);
+            }
+          },
+        });
+
+        googleBtnRef.current.innerHTML = '';
+        gis.renderButton(googleBtnRef.current, {
+          theme: 'outline',
+          size: 'large',
+          text: authTab === 'signup' ? 'signup_with' : 'signin_with',
+          width: 340,
+          shape: 'pill',
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setGoogleLoadFailed(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    authTab,
+    currentProfile,
+    googleClientId,
+    isOpen,
+    marketingOptIn,
+    onClose,
+    onSignIn,
+    proxyUrl,
+  ]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMsg('');
+
+    const cleanEmail = email.trim().toLowerCase();
     const cleanName = name.trim();
-    if (!cleanName) return;
-    onSignIn({
-      name: cleanName,
-      email: email.trim() || undefined,
-      signedInAt: Date.now(),
-    });
-    onClose();
+
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(cleanEmail)) {
+      setErrorMsg('Please enter a valid email address.');
+      return;
+    }
+
+    if (!hasBackendAuth) {
+      if (cleanEmail === ADMIN_EMAIL) {
+        setErrorMsg(
+          'Admin verification requires the Ask Avi backend on aviperera.com/ask-avi or local server.'
+        );
+        return;
+      }
+      onSignIn({
+        name: cleanName || cleanEmail.split('@')[0],
+        email: cleanEmail,
+        provider: 'email',
+        isAdmin: false,
+        marketingOptIn,
+        signedInAt: Date.now(),
+      });
+      onClose();
+      return;
+    }
+
+    if (password.length < 6) {
+      setErrorMsg('Password must be at least 6 characters.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const user =
+        authTab === 'signup'
+          ? await signUpWithEmail(
+              {
+                name: cleanName || cleanEmail.split('@')[0],
+                email: cleanEmail,
+                password,
+                marketingOptIn,
+                ...(needsAdminPasscode ? { adminPasscode } : {}),
+              },
+              proxyUrl
+            )
+          : await signInWithEmail(
+              {
+                email: cleanEmail,
+                password,
+                ...(needsAdminPasscode ? { adminPasscode } : {}),
+              },
+              proxyUrl
+            );
+      onSignIn(user);
+      onClose();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Authentication failed.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
+  const isAdmin = isVerifiedAdmin(currentProfile);
+
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Sign in to Ask Avi">
+    <div
+      className="modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={currentProfile ? 'Account profile' : 'Sign in to Ask Avi'}
+    >
       <div className="modal-card modal-card-sm">
         <div className="modal-head">
-          <h2>{currentProfile ? 'Account profile' : 'Sign in to Ask Avi'}</h2>
+          <h2>
+            {currentProfile
+              ? 'Account'
+              : authTab === 'signup'
+                ? 'Create your account'
+                : 'Sign in to Ask Avi'}
+          </h2>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
             <X size={18} />
           </button>
         </div>
 
-        <form className="modal-body" onSubmit={handleSubmit}>
-          <p className="settings-desc">
-            Personalize your workspace profile in this browser. Your name, profile details, and chat history stay strictly local and are never uploaded to third parties.
-          </p>
+        <div className="modal-body">
+          {currentProfile ? (
+            <div className="signed-in-panel">
+              <div className="signed-in-header">
+                {currentProfile.picture ? (
+                  <img
+                    src={currentProfile.picture}
+                    alt={currentProfile.name}
+                    className="signed-in-avatar"
+                  />
+                ) : (
+                  <div className="signed-in-avatar fallback">
+                    {(currentProfile.name[0] || 'A').toUpperCase()}
+                  </div>
+                )}
+                <div>
+                  <div className="signed-in-name">
+                    <span>{currentProfile.name}</span>
+                    {isAdmin && (
+                      <span className="admin-verified-pill">
+                        <ShieldCheck size={11} />
+                        <span>Admin</span>
+                      </span>
+                    )}
+                  </div>
+                  {currentProfile.email && (
+                    <div className="signed-in-email">{currentProfile.email}</div>
+                  )}
+                  <div className="signed-in-meta">
+                    Provider: {currentProfile.provider ?? 'email'}
+                    {currentProfile.marketingOptIn ? ' · Updates enabled' : ''}
+                  </div>
+                </div>
+              </div>
 
-          <div className="settings-form-grid">
-            <label>
-              <span>Display name</span>
-              <input
-                type="text"
-                required
-                autoFocus
-                value={name}
-                placeholder="e.g. Avi"
-                onChange={(e) => setName(e.target.value)}
-              />
-            </label>
+              <div className="modal-actions-row">
+                {currentProfile.provider === 'wordpress' && authConfig?.wpLogoutUrl ? (
+                  <a href={authConfig.wpLogoutUrl} className="btn-secondary-sm">
+                    Sign out of WordPress
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn-secondary-sm"
+                    onClick={() => {
+                      onSignOut();
+                      onClose();
+                    }}
+                  >
+                    Sign out
+                  </button>
+                )}
+                <button type="button" className="btn-primary-sm" onClick={onClose}>
+                  Done
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="auth-mode-tabs" role="tablist">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={authTab === 'signin'}
+                  className={`auth-mode-tab ${authTab === 'signin' ? 'active' : ''}`}
+                  onClick={() => {
+                    setAuthTab('signin');
+                    setErrorMsg('');
+                  }}
+                >
+                  Sign in
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={authTab === 'signup'}
+                  className={`auth-mode-tab ${authTab === 'signup' ? 'active' : ''}`}
+                  onClick={() => {
+                    setAuthTab('signup');
+                    setErrorMsg('');
+                  }}
+                >
+                  Create account
+                </button>
+              </div>
 
-            <label>
-              <span>Email (optional)</span>
-              <input
-                type="email"
-                value={email}
-                placeholder="you@domain.com"
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </label>
-          </div>
+              {(googleClientId || (authConfig?.wpSsoEnabled && authConfig.wpLoginUrl)) && (
+                <div className="auth-sso-group">
+                  {googleClientId && !googleLoadFailed && (
+                    <div ref={googleBtnRef} className="google-gsi-slot" />
+                  )}
+                  {googleClientId && googleLoadFailed && (
+                    <p className="settings-desc">
+                      Google Sign-In could not load in this browser context. Continue with email below.
+                    </p>
+                  )}
+                  {authConfig?.wpSsoEnabled && authConfig.wpLoginUrl && (
+                    <a href={authConfig.wpLoginUrl} className="wp-sso-btn">
+                      <UserCheck size={15} />
+                      <span>Continue with aviperera.com WordPress</span>
+                    </a>
+                  )}
+                  <div className="auth-divider">
+                    <span>or continue with email</span>
+                  </div>
+                </div>
+              )}
 
-          <div className="modal-actions-row">
-            {currentProfile && (
-              <button
-                type="button"
-                className="btn-secondary-sm"
-                onClick={() => {
-                  onSignOut();
-                  onClose();
-                }}
-              >
-                Sign out
-              </button>
-            )}
-            <button type="submit" className="btn-primary-sm" disabled={!name.trim()}>
-              <UserCheck size={14} />
-              <span>{currentProfile ? 'Save profile' : 'Continue'}</span>
-            </button>
-          </div>
-        </form>
+              <form onSubmit={handleSubmit} className="settings-section">
+                {authTab === 'signup' && (
+                  <label className="settings-field">
+                    <span>Full name</span>
+                    <input
+                      type="text"
+                      placeholder="Your name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                    />
+                  </label>
+                )}
+
+                <label className="settings-field">
+                  <span>Email address</span>
+                  <input
+                    type="email"
+                    required
+                    placeholder="you@domain.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </label>
+
+                {hasBackendAuth && (
+                  <label className="settings-field">
+                    <span>Password</span>
+                    <input
+                      type="password"
+                      required
+                      minLength={6}
+                      placeholder={
+                        authTab === 'signup' ? 'Create a password (min 6 chars)' : 'Enter password'
+                      }
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                    />
+                  </label>
+                )}
+
+                {hasBackendAuth && needsAdminPasscode && (
+                  <label className="settings-field admin-passcode-field">
+                    <span>Admin verification passcode</span>
+                    <input
+                      type="password"
+                      required
+                      placeholder="Required for workwithavip@gmail.com"
+                      value={adminPasscode}
+                      onChange={(e) => setAdminPasscode(e.target.value)}
+                    />
+                  </label>
+                )}
+
+                {authTab === 'signup' && (
+                  <label className="auth-optin-label">
+                    <input
+                      type="checkbox"
+                      checked={marketingOptIn}
+                      onChange={(e) => setMarketingOptIn(e.target.checked)}
+                    />
+                    <span>Send me occasional essays, dispatches &amp; product updates from Avi Perera.</span>
+                  </label>
+                )}
+
+                {errorMsg && (
+                  <div className="inline-alert error">
+                    <AlertCircle size={15} />
+                    <span>{errorMsg}</span>
+                  </div>
+                )}
+
+                <div className="modal-actions-row">
+                  <button
+                    type="submit"
+                    className="btn-primary-sm full-width-btn"
+                    disabled={submitting}
+                  >
+                    <UserCheck size={14} />
+                    <span>
+                      {submitting
+                        ? 'Please wait…'
+                        : authTab === 'signup'
+                          ? 'Create account'
+                          : 'Sign in'}
+                    </span>
+                  </button>
+                </div>
+              </form>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -139,7 +483,7 @@ export function AccountInfoModal({
                   <h3>Using Ask Avi</h3>
                 </div>
                 <p className="settings-desc">
-                  Ask Avi is an open-ended conversational persona modeled after Avi Perera’s writing, legal research, and systems work. Use the model selector in the bottom-right of the chatbox to switch models or toggle live web lookup, and click <strong>Context</strong> to attach essays or your own files.
+                  Ask Avi is an open-ended conversational persona modeled after Avi Perera’s writing, legal research, and systems work. Use the selector in the bottom-right of the composer to switch modes or toggle live web lookup, and click <strong>Context</strong> to attach essays or your own files.
                 </p>
               </section>
 
@@ -171,11 +515,11 @@ export function AccountInfoModal({
               <section className="settings-section">
                 <div className="settings-section-title">
                   <Mail size={16} />
-                  <h3>Direct Contact &amp; Configuration</h3>
+                  <h3>Support &amp; Feedback</h3>
                 </div>
                 <p className="settings-desc">
-                  Need help embedding Ask Avi or connecting API keys? Open Settings or reach out to{' '}
-                  <a href="mailto:workwithavip@gmail.com">workwithavip@gmail.com</a>.
+                  Questions, feedback, or need help with an issue? Reach out directly to{' '}
+                  <a href="mailto:workwithavip@gmail.com">workwithavip@gmail.com</a> or adjust your preferences in Settings.
                 </p>
                 <div className="modal-actions-row">
                   <button
@@ -199,7 +543,7 @@ export function AccountInfoModal({
                   <h3>Persona, Grounding &amp; Privacy</h3>
                 </div>
                 <p className="settings-desc">
-                  Ask Avi pairs reasoning models with optional live open-web grounding and 108 indexed dossiers across International Humanitarian Law (LAWS), AI governance, philosophy, SovDash, and Lex Machina. Chats and optional browser keys remain in your own browser storage.
+                  Ask Avi pairs generative reasoning with optional live open-web verification and 108 indexed dossiers across International Humanitarian Law (LAWS), AI governance, philosophy, SovDash, and Lex Machina. Conversation threads remain stored locally in your own browser.
                 </p>
               </section>
 

@@ -10,6 +10,11 @@ import {
 import { handleGeminiProxyRequest } from '../shared/geminiProxy';
 import { resolveEffectiveProxyUrl } from '../src/engine/llmService';
 import { knowledgeIndex, KNOWLEDGE_META } from '../src/engine/rag';
+import {
+  exportUsersAsCsv,
+  isVerifiedAdmin,
+  resolveEffectiveAuthUrl,
+} from '../src/utils/authClient';
 import { renderMarkdownToSafeHtml } from '../src/utils/markdown';
 import { splitThinkingAndAnswer } from '../src/utils/thinking';
 import {
@@ -265,10 +270,52 @@ describe('Thread Storage & Export Helpers', () => {
   });
 
   it('persists and clears local user profile for bottom-left Sign in / Sign out', () => {
-    saveUserProfile({ name: 'Avi Perera', email: 'avi@example.com', signedInAt: 1234 });
+    saveUserProfile({
+      name: 'Avi Perera',
+      email: 'avi@example.com',
+      provider: 'email',
+      isAdmin: false,
+      signedInAt: 1234,
+    });
     expect(loadUserProfile()?.name).toBe('Avi Perera');
     expect(loadUserProfile()?.email).toBe('avi@example.com');
     saveUserProfile(null);
     expect(loadUserProfile()).toBeNull();
+  });
+
+  it('resolves relative Hostinger/local subpath endpoints and gates admin strictly', () => {
+    expect(resolveEffectiveProxyUrl()).toBe('./api/chat');
+    expect(resolveEffectiveAuthUrl()).toBe('./api/auth');
+    expect(resolveEffectiveAuthUrl('https://aviperera.com/ask-avi/api/chat')).toBe(
+      'https://aviperera.com/ask-avi/api/auth'
+    );
+
+    expect(
+      isVerifiedAdmin({ name: 'Avi', email: 'workwithavip@gmail.com', isAdmin: true, signedInAt: 1 })
+    ).toBe(true);
+    expect(
+      isVerifiedAdmin({ name: 'Visitor', email: 'workwithavip@gmail.com', isAdmin: false, signedInAt: 1 })
+    ).toBe(false);
+    expect(
+      isVerifiedAdmin({ name: 'Evil', email: 'evil@example.com', isAdmin: true, signedInAt: 1 })
+    ).toBe(false);
+
+    const csv = exportUsersAsCsv([
+      {
+        id: '1',
+        name: '=CMD()',
+        email: 'user@example.com',
+        provider: 'google',
+        role: 'user',
+        marketingOptIn: true,
+        createdAt: 1000,
+        lastSeenAt: 2000,
+        loginCount: 1,
+        chatCount: 3,
+        errorCount: 0,
+      },
+    ]);
+    expect(csv).toContain("'=CMD()");
+    expect(csv).toContain('user@example.com,google,user,Yes');
   });
 });

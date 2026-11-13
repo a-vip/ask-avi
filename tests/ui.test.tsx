@@ -4,12 +4,15 @@ import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+import { Composer } from '../src/components/Composer';
 import { MessageBubble } from '../src/components/MessageBubble';
+import { SettingsModal } from '../src/components/SettingsModal';
 import { Sidebar } from '../src/components/Sidebar';
 import { TopBar } from '../src/components/TopBar';
 import { WelcomeScreen } from '../src/components/WelcomeScreen';
 import { STARTER_PROMPTS } from '../src/data/persona';
 import type { ChatMessage } from '../src/types/chat';
+import { DEFAULT_SETTINGS } from '../src/utils/storage';
 
 function mountTestElement(element: React.ReactElement) {
   const container = document.createElement('div');
@@ -49,6 +52,10 @@ describe('Minimalist Frontier UI Upgrades', () => {
         inputRef={{ current: null }}
       />
     );
+
+    const headingLines = container.querySelectorAll('.welcome-heading-line');
+    expect(headingLines.length).toBe(2);
+    expect(headingLines[1]?.textContent?.trim()).toBe('Ask Avi anything.');
 
     const textarea = container.querySelector('textarea');
     expect(textarea?.getAttribute('placeholder')).toBe('How can I help you today?');
@@ -106,7 +113,8 @@ describe('Minimalist Frontier UI Upgrades', () => {
         onOpenSettings={vi.fn()}
       />
     );
-    expect(bubble.container.textContent).toContain('Ask Avi');
+    expect(bubble.container.querySelector('.msg-speaker-name')?.textContent).toBe('Avi');
+    expect(bubble.container.textContent).not.toContain('Ask Avi');
     expect(bubble.container.querySelector('.msg-model-badge')).toBeNull();
     expect(bubble.container.textContent).not.toContain('gpt-oss-120b');
     expect(bubble.container.textContent).not.toContain('Groq Free');
@@ -154,5 +162,84 @@ describe('Minimalist Frontier UI Upgrades', () => {
     expect(menuText).toContain('Learn more');
     expect(menuText).toContain('Sign in');
     cleanup();
+  });
+
+  it('uses updated AI disclaimer in composer and hides API controls from non-admin users', () => {
+    const composer = mountTestElement(
+      <Composer
+        value=""
+        onChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onStop={vi.fn()}
+        isStreaming={false}
+        engineId="oss-reasoning"
+        webSearchEnabled
+        onSelectEngine={vi.fn()}
+        onToggleWebSearch={vi.fn()}
+        onOpenSettings={vi.fn()}
+        voiceStyle="standard"
+        onChangeVoiceStyle={vi.fn()}
+        attachedContext={null}
+        onAttachContext={vi.fn()}
+        onOpenDossierPicker={vi.fn()}
+      />
+    );
+    expect(composer.container.querySelector('.composer-disclaimer')?.textContent).toBe(
+      'Ask Avi is AI and can make mistakes. Please double-check responses.'
+    );
+    composer.cleanup();
+
+    const guestSettings = mountTestElement(
+      <SettingsModal
+        isOpen
+        settings={DEFAULT_SETTINGS}
+        userProfile={null}
+        onClose={vi.fn()}
+        onUpdateSettings={vi.fn()}
+        onToggleTheme={vi.fn()}
+      />
+    );
+    expect(guestSettings.container.textContent).toContain('Appearance');
+    expect(guestSettings.container.textContent).not.toContain('Admin & Analytics');
+    expect(guestSettings.container.textContent).not.toContain('APIs & Deployment');
+    expect(guestSettings.container.textContent).not.toContain('Groq Free Key');
+    guestSettings.cleanup();
+
+    const spoofedSettings = mountTestElement(
+      <SettingsModal
+        isOpen
+        settings={DEFAULT_SETTINGS}
+        userProfile={{
+          name: 'Spoofer',
+          email: 'other@example.com',
+          isAdmin: true,
+          signedInAt: 1,
+        }}
+        onClose={vi.fn()}
+        onUpdateSettings={vi.fn()}
+      />
+    );
+    expect(spoofedSettings.container.textContent).not.toContain('Admin & Analytics');
+    expect(spoofedSettings.container.textContent).not.toContain('APIs & Deployment');
+    spoofedSettings.cleanup();
+
+    const adminSettings = mountTestElement(
+      <SettingsModal
+        isOpen
+        settings={DEFAULT_SETTINGS}
+        userProfile={{
+          name: 'Avi Perera',
+          email: 'workwithavip@gmail.com',
+          provider: 'google',
+          isAdmin: true,
+          signedInAt: 1,
+        }}
+        onClose={vi.fn()}
+        onUpdateSettings={vi.fn()}
+      />
+    );
+    expect(adminSettings.container.textContent).toContain('Admin & Analytics');
+    expect(adminSettings.container.textContent).toContain('APIs & Deployment');
+    adminSettings.cleanup();
   });
 });

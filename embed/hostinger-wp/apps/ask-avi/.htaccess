@@ -1,0 +1,28 @@
+Options -Indexes
+RewriteEngine On
+
+# Preserve Authorization header across FastCGI / LiteSpeed SAPI
+RewriteCond %{HTTP:Authorization} .
+RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+# Disable compression buffering on streaming chat endpoint
+<IfModule mod_env.c>
+  SetEnvIf Request_URI "api/chat" no-gzip=1
+</IfModule>
+
+<IfModule mod_headers.c>
+  <FilesMatch "\.php$">
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Accel-Buffering "no"
+  </FilesMatch>
+</IfModule>
+
+# Route ./api/chat and ./api/auth cleanly to PHP handlers
+RewriteRule ^api/chat/?$ api/chat.php [L,QSA]
+RewriteRule ^api/auth/?$ api/auth.php [L,QSA]
+
+# Serve existing files & assets directly; otherwise SPA index.html
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+RewriteRule . index.html [L]

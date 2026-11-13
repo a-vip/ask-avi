@@ -112,8 +112,14 @@ export interface CustomApiConfig {
 }
 
 export interface UserProfile {
+  id?: string;
   name: string;
   email?: string;
+  picture?: string;
+  provider?: 'google' | 'email' | 'wordpress' | 'local';
+  isAdmin?: boolean;
+  sessionToken?: string;
+  marketingOptIn?: boolean;
   signedInAt: number;
 }
 

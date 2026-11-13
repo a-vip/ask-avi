@@ -21,6 +21,7 @@ interface WelcomeScreenProps {
   attachedContext: AttachedContext | null;
   onAttachContext: (ctx: AttachedContext | null) => void;
   onOpenDossierPicker: () => void;
+  isAdmin?: boolean;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
 }
 
@@ -42,6 +43,7 @@ export function WelcomeScreen({
   attachedContext,
   onAttachContext,
   onOpenDossierPicker,
+  isAdmin = false,
   inputRef,
 }: WelcomeScreenProps) {
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
@@ -62,7 +64,10 @@ export function WelcomeScreen({
           </div>
 
           <h1 className="welcome-heading">
-            {greeting}. <em>Ask Avi</em> anything.
+            <span className="welcome-heading-line">{greeting}</span>
+            <span className="welcome-heading-line">
+              <em>Ask Avi</em> anything.
+            </span>
           </h1>
         </div>
 
@@ -82,6 +87,7 @@ export function WelcomeScreen({
           attachedContext={attachedContext}
           onAttachContext={onAttachContext}
           onOpenDossierPicker={onOpenDossierPicker}
+          isAdmin={isAdmin}
           centered
           inputRef={inputRef}
         />

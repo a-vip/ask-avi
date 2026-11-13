@@ -114,11 +114,65 @@ function serveStaticAsset(pathname: string, res: ServerResponse): void {
 }
 
 loadLocalEnvFile();
+const authMod = await import('./auth-store.ts');
 
 const server = createServer(async (req, res) => {
   try {
     const reqUrl = new URL(req.url ?? '/', `http://127.0.0.1:${PORT}`);
+    if (reqUrl.pathname === '/api/auth') {
+      await authMod.handleAuthRequest(req, reqUrl, res);
+      return;
+    }
     if (reqUrl.pathname === '/api/chat') {
+      const startedAt = Date.now();
+      const bearerUser = authMod.extractBearerUser(req);
+      let capturedStatus = 200;
+      let capturedModel = '';
+      let errorSnippet = '';
+
+      const origWriteHead = res.writeHead.bind(res);
+      res.writeHead = ((statusCode: number, ...rest: unknown[]) => {
+        capturedStatus = statusCode;
+        return (origWriteHead as (...args: unknown[]) => ServerResponse)(statusCode, ...rest);
+      }) as ServerResponse['writeHead'];
+
+      const origWrite = res.write.bind(res);
+      res.write = ((chunk: unknown, ...rest: unknown[]) => {
+        if (capturedStatus >= 400 && errorSnippet.length < 500 && chunk) {
+          errorSnippet += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
+        }
+        return (origWrite as (...args: unknown[]) => boolean)(chunk, ...rest);
+      }) as ServerResponse['write'];
+
+      const origEnd = res.end.bind(res);
+      res.end = ((chunk?: unknown, ...rest: unknown[]) => {
+        if (
+          capturedStatus >= 400 &&
+          errorSnippet.length < 500 &&
+          chunk &&
+          typeof chunk !== 'function'
+        ) {
+          errorSnippet += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
+        }
+        const modelHeader = res.getHeader('X-Ask-Avi-Model');
+        if (modelHeader) {
+          capturedModel = Array.isArray(modelHeader)
+            ? modelHeader.join(', ')
+            : String(modelHeader);
+        }
+        return (origEnd as (...args: unknown[]) => ServerResponse)(chunk, ...rest);
+      }) as ServerResponse['end'];
+
+      res.on('finish', () => {
+        authMod.recordChatTelemetry({
+          user: bearerUser,
+          statusCode: res.statusCode || capturedStatus,
+          modelUsed: capturedModel || undefined,
+          latencyMs: Date.now() - startedAt,
+          errorMessage: errorSnippet ? errorSnippet.slice(0, 400) : undefined,
+        });
+      });
+
       await handleApiRequest(req, res);
       return;
     }
@@ -138,7 +192,9 @@ server.listen(PORT, '127.0.0.1', () => {
   const hasGroq = Boolean(process.env.GROQ_API_KEY?.trim());
   const hasOr = Boolean(process.env.OPENROUTER_API_KEY?.trim());
   const hasGem = Boolean(process.env.GEMINI_API_KEY?.trim());
+  const hasGoogleOAuth = Boolean(process.env.GOOGLE_CLIENT_ID?.trim());
+  const hasAdminPasscode = Boolean(process.env.ASK_AVI_ADMIN_PASSCODE?.trim());
   console.log(
-    `Ask Avi local server listening on http://localhost:${PORT} (groq=${hasGroq}, openrouter=${hasOr}, gemini=${hasGem})`
+    `Ask Avi local server listening on http://localhost:${PORT} (groq=${hasGroq}, openrouter=${hasOr}, gemini=${hasGem}, googleOAuth=${hasGoogleOAuth}, adminPasscode=${hasAdminPasscode})`
   );
 });

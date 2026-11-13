@@ -8,6 +8,12 @@ import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { BackendNotConfiguredError, llmService } from './engine/llmService';
+import {
+  fetchAuthConfig,
+  isVerifiedAdmin,
+  reportClientTelemetry,
+  type AuthConfigResponse,
+} from './utils/authClient';
 import type {
   AppSettings,
   AttachedContext,
@@ -63,8 +69,11 @@ export default function App() {
   const [drawerFocusIdx, setDrawerFocusIdx] = useState<number | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(() => loadUserProfile());
+  const [authConfig, setAuthConfig] = useState<AuthConfigResponse | null>(null);
   const [signInOpen, setSignInOpen] = useState(false);
   const [accountInfoMode, setAccountInfoMode] = useState<'help' | 'about' | null>(null);
+
+  const isAdmin = isVerifiedAdmin(userProfile);
 
   const abortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -148,6 +157,47 @@ export default function App() {
     saveUserProfile(userProfile);
   }, [userProfile]);
 
+  useEffect(() => {
+    let active = true;
+    fetchAuthConfig(userProfile?.sessionToken, settings.proxyUrl).then((cfg) => {
+      if (!active || !cfg) return;
+      setAuthConfig(cfg);
+      if (cfg.currentUser) {
+        setUserProfile((prev) => ({
+          ...cfg.currentUser!,
+          sessionToken: cfg.currentUser!.sessionToken ?? prev?.sessionToken,
+        }));
+      } else {
+        setUserProfile((prev) => {
+          if (prev && (prev.isAdmin || prev.provider === 'wordpress')) {
+            return null;
+          }
+          return prev;
+        });
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [settings.proxyUrl]);
+
+  const handleClearAllThreads = useCallback(() => {
+    setThreads([]);
+    setActiveThreadId(null);
+    setTempThread(null);
+  }, []);
+
+  const handleExportAllThreads = useCallback(() => {
+    const payload = JSON.stringify({ exportedAt: new Date().toISOString(), threads }, null, 2);
+    const blob = new Blob([payload], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `ask-avi-history-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }, [threads]);
+
   // Track whether user is near bottom during streaming
   const handleScrollContainer = () => {
     const el = scrollContainerRef.current;
@@ -222,6 +272,7 @@ export default function App() {
           openRouterApiKey: settings.openRouterApiKey,
           geminiApiKey: settings.geminiApiKey,
           proxyUrl: settings.proxyUrl,
+          sessionToken: userProfile?.sessionToken,
           attachedContext: attached ?? undefined,
           customApi: settings.customApi,
           signal: controller.signal,
@@ -272,7 +323,20 @@ export default function App() {
           ? '*Generation stopped.*'
           : err instanceof Error
             ? err.message
-            : 'Unable to reach Gemini API. Please check your connection or API settings.';
+            : 'Unable to reach AI service. Please check your connection or try again.';
+
+        if (!isAbort) {
+          void reportClientTelemetry(
+            {
+              event: needsSetup ? 'backend_unconfigured' : 'chat_client_error',
+              level: 'error',
+              message: messageText,
+              engineId: engineToUse,
+            },
+            userProfile?.sessionToken,
+            settings.proxyUrl
+          );
+        }
 
         updateThreadMessages(threadId, (msgs) =>
           msgs.map((m) =>
@@ -301,6 +365,7 @@ export default function App() {
       settings.geminiApiKey,
       settings.proxyUrl,
       settings.customApi,
+      userProfile?.sessionToken,
       updateThreadMessages,
     ]
   );
@@ -635,6 +700,7 @@ export default function App() {
                 setDrawerTab('archive');
                 setKnowledgeOpen(true);
               }}
+              isAdmin={isAdmin}
               inputRef={inputRef}
             />
           ) : (
@@ -644,6 +710,7 @@ export default function App() {
                   key={msg.id}
                   message={msg}
                   isLastAssistant={msg.id === lastAssistantId}
+                  isAdmin={isAdmin}
                   onEditUserMessage={handleEditUserMessage}
                   onRegenerate={handleRegenerate}
                   onFollowUpClick={(prompt) => handleSubmitPrompt(prompt)}
@@ -684,6 +751,7 @@ export default function App() {
                 setDrawerTab('archive');
                 setKnowledgeOpen(true);
               }}
+              isAdmin={isAdmin}
               inputRef={inputRef}
             />
           </div>
@@ -703,13 +771,21 @@ export default function App() {
       <SettingsModal
         isOpen={settingsOpen}
         settings={settings}
+        theme={settings.theme}
+        userProfile={userProfile}
         onClose={() => setSettingsOpen(false)}
         onUpdateSettings={setSettings}
+        onToggleTheme={handleToggleTheme}
+        onOpenSignIn={() => setSignInOpen(true)}
+        onClearAllThreads={handleClearAllThreads}
+        onExportAllThreads={handleExportAllThreads}
       />
 
       <SignInModal
         isOpen={signInOpen}
         currentProfile={userProfile}
+        authConfig={authConfig}
+        proxyUrl={settings.proxyUrl}
         onClose={() => setSignInOpen(false)}
         onSignIn={setUserProfile}
         onSignOut={() => setUserProfile(null)}

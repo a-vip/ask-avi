@@ -99,6 +99,7 @@ export interface StreamGenerateParams {
   openRouterApiKey?: string;
   geminiApiKey?: string;
   proxyUrl?: string;
+  sessionToken?: string;
   attachedContext?: AttachedContext;
   customApi?: CustomApiConfig;
   signal?: AbortSignal;
@@ -148,7 +149,7 @@ export function resolveEffectiveProxyUrl(customProxyUrl?: string): string {
     const host = window.location.hostname.toLowerCase();
     // Static GitHub Pages cannot host serverless functions at /api/chat
     if (!host.endsWith('github.io')) {
-      return '/api/chat';
+      return './api/chat';
     }
   }
   return '';
@@ -377,7 +378,13 @@ class AviLLMService {
       ];
       const proxyRes = await fetch(proxyUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(params.sessionToken
+            ? { Authorization: `Bearer ${params.sessionToken}` }
+            : {}),
+        },
         signal: params.signal,
         body: JSON.stringify({
           mode: tier,
@@ -560,7 +567,13 @@ class AviLLMService {
     } else {
       response = await fetch(proxyUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(params.sessionToken
+            ? { Authorization: `Bearer ${params.sessionToken}` }
+            : {}),
+        },
         signal: params.signal,
         body: JSON.stringify({
           mode: 'google',

@@ -33,6 +33,7 @@ interface ComposerProps {
   attachedContext: AttachedContext | null;
   onAttachContext: (ctx: AttachedContext | null) => void;
   onOpenDossierPicker: () => void;
+  isAdmin?: boolean;
   centered?: boolean;
   inputRef?: React.RefObject<HTMLTextAreaElement | null>;
 }
@@ -74,6 +75,7 @@ export function Composer({
   attachedContext,
   onAttachContext,
   onOpenDossierPicker,
+  isAdmin = false,
   centered = false,
   inputRef: externalRef,
 }: ComposerProps) {
@@ -333,7 +335,7 @@ export function Composer({
                     </button>
                   </div>
 
-                  {ENGINE_OPTIONS.map((opt) => {
+                  {ENGINE_OPTIONS.filter((opt) => isAdmin || opt.id !== 'custom-api').map((opt) => {
                     const selected = opt.id === engineId;
                     return (
                       <button
@@ -345,7 +347,7 @@ export function Composer({
                         onClick={() => {
                           onSelectEngine(opt.id);
                           setModelOpen(false);
-                          if (opt.id === 'custom-api') {
+                          if (opt.id === 'custom-api' && isAdmin) {
                             onOpenSettings();
                           }
                         }}
@@ -375,7 +377,7 @@ export function Composer({
                       }}
                     >
                       <Settings size={13} />
-                      <span>API Key &amp; Proxy Settings</span>
+                      <span>{isAdmin ? 'Admin & API Settings' : 'Settings'}</span>
                     </button>
                   </div>
                 </div>
@@ -422,7 +424,7 @@ export function Composer({
 
       {!centered && (
         <p className="composer-disclaimer">
-          Ask Avi can make mistakes. Please double-check responses.
+          Ask Avi is AI and can make mistakes. Please double-check responses.
         </p>
       )}
     </div>

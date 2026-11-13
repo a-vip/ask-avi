@@ -24,6 +24,7 @@ import { AviAvatar } from './AviAvatar';
 interface MessageBubbleProps {
   message: ChatMessage;
   isLastAssistant: boolean;
+  isAdmin?: boolean;
   onEditUserMessage: (messageId: string, newContent: string) => void;
   onRegenerate: (assistantMessageId: string) => void;
   onFollowUpClick: (prompt: string) => void;
@@ -35,6 +36,7 @@ interface MessageBubbleProps {
 export function MessageBubble({
   message,
   isLastAssistant,
+  isAdmin = false,
   onEditUserMessage,
   onRegenerate,
   onFollowUpClick,
@@ -244,14 +246,14 @@ export function MessageBubble({
   const hasArchiveSources = Boolean(message.sources && message.sources.length > 0);
 
   return (
-    <article className="msg-row msg-assistant-row" aria-label="Ask Avi response">
+    <article className="msg-row msg-assistant-row" aria-label="Avi response">
       <div className="msg-assistant-avatar">
         <AviAvatar size={30} />
       </div>
 
       <div className="msg-assistant-body">
         <div className="msg-assistant-header">
-          <span className="msg-speaker-name">Ask Avi</span>
+          <span className="msg-speaker-name">Avi</span>
         </div>
 
         {/* Antigravity / Claude / Gemini Reasoning Timeline */}
@@ -335,11 +337,26 @@ export function MessageBubble({
 
         {message.needsBackendSetup ? (
           <div className="setup-prompt-card">
-            <p className="setup-prompt-text">{message.content}</p>
-            <button type="button" className="btn-primary-sm" onClick={onOpenSettings}>
-              <KeyRound size={14} />
-              <span>Connect Free Open-Source AI / Proxy</span>
-            </button>
+            <p className="setup-prompt-text">
+              {isAdmin
+                ? message.content
+                : 'Ask Avi could not reach the response service right now. Please try again in a moment.'}
+            </p>
+            {isAdmin ? (
+              <button type="button" className="btn-primary-sm" onClick={onOpenSettings}>
+                <KeyRound size={14} />
+                <span>Open Admin API Settings</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn-secondary-sm"
+                onClick={() => onRegenerate(message.id)}
+              >
+                <RotateCcw size={14} />
+                <span>Try again</span>
+              </button>
+            )}
           </div>
         ) : message.isStreaming && !message.content && !hasReasoningBlock ? (
           <div className="thinking-dots" aria-label="Thinking">

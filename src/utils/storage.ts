@@ -184,8 +184,20 @@ export function loadUserProfile(): UserProfile | null {
     const name = typeof parsed.name === 'string' ? parsed.name.trim() : '';
     if (!name) return null;
     return {
+      id: typeof parsed.id === 'string' ? parsed.id : undefined,
       name,
       email: typeof parsed.email === 'string' && parsed.email.trim() ? parsed.email.trim() : undefined,
+      picture: typeof parsed.picture === 'string' && parsed.picture.trim() ? parsed.picture.trim() : undefined,
+      provider:
+        parsed.provider === 'google' ||
+        parsed.provider === 'email' ||
+        parsed.provider === 'wordpress' ||
+        parsed.provider === 'local'
+          ? parsed.provider
+          : 'local',
+      isAdmin: Boolean(parsed.isAdmin),
+      sessionToken: typeof parsed.sessionToken === 'string' ? parsed.sessionToken : undefined,
+      marketingOptIn: typeof parsed.marketingOptIn === 'boolean' ? parsed.marketingOptIn : undefined,
       signedInAt: typeof parsed.signedInAt === 'number' ? parsed.signedInAt : Date.now(),
     };
   } catch {

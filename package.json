@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:wp": "vite build && node scripts/build-wp-bundle.mjs",
     "preview": "vite preview --port 4173",
     "start:local": "node scripts/local-server.ts",
     "test": "vitest run",

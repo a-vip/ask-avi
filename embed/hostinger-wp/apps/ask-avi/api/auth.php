@@ -186,8 +186,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     }
   }
 
-  $wpLoginUrl = function_exists('wp_login_url') ? wp_login_url(home_url('/ask-avi/')) : '';
-  $wpLogoutUrl = function_exists('wp_logout_url') ? wp_logout_url(home_url('/ask-avi/')) : '';
+  $wpLoginUrl = function_exists('wp_login_url')
+    ? html_entity_decode(wp_login_url(home_url('/ask-avi/')), ENT_QUOTES, 'UTF-8')
+    : '';
+  $wpLogoutUrl = function_exists('wp_logout_url')
+    ? html_entity_decode(wp_logout_url(home_url('/ask-avi/')), ENT_QUOTES, 'UTF-8')
+    : '';
 
   ask_avi_send_json(200, [
     'ok' => true,

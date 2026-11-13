@@ -28,11 +28,16 @@ $ask_avi_app_url = get_template_directory_uri() . '/apps/ask-avi/index.html?v=20
       #ask-avi-host-frame {
         position: fixed;
         inset: 0;
+        z-index: 2147483000;
         width: 100vw;
         height: 100dvh;
         border: 0;
         display: block;
         background: #0b0f17;
+      }
+      #kt-scroll-up,
+      .kt-scroll-up-wrap {
+        display: none !important;
       }
       html[data-ask-avi-theme='light'],
       html[data-ask-avi-theme='light'] body,

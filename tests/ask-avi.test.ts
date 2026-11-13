@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { buildAviSystemPrompt, ENGINE_OPTIONS } from '../src/data/persona';
 import {
   extractGeminiChunkDelta,
+  extractOpenAIChunkDelta,
   mergeUniqueQueries,
   mergeUniqueWebSources,
 } from '../src/engine/geminiStream';
+import { handleGeminiProxyRequest } from '../shared/geminiProxy';
 import { resolveEffectiveProxyUrl } from '../src/engine/llmService';
 import { knowledgeIndex, KNOWLEDGE_META } from '../src/engine/rag';
 import { renderMarkdownToSafeHtml } from '../src/utils/markdown';
@@ -46,15 +48,77 @@ describe('Knowledge Index & RAG Retrieval', () => {
   });
 });
 
-describe('Gemini 3 & 4 Frontier Config, SSE Parser & Proxy Resolution', () => {
-  it('defaults to Gemini 3 Flash with thinking & live web search enabled (no WebGPU/Instant Archive)', () => {
-    expect(DEFAULT_SETTINGS.engineId).toBe('gemini-flash');
+describe('Free Open-Source Default, Multi-Provider Config & SSE Parsers', () => {
+  it('defaults to completely free Open-Source Reasoning with Google Gemini retained as options', () => {
+    expect(DEFAULT_SETTINGS.engineId).toBe('oss-reasoning');
     expect(DEFAULT_SETTINGS.webSearchEnabled).toBe(true);
-    expect(ENGINE_OPTIONS.map((e) => e.id)).toEqual(['gemini-flash', 'gemini-pro', 'custom-api']);
-    expect(ENGINE_OPTIONS[0].geminiModelId).toBe('gemini-3-flash-preview');
-    expect(ENGINE_OPTIONS[1].geminiModelId).toBe('gemini-4-hydrogen');
-    expect(ENGINE_OPTIONS[0].thinkingBudget).toBe(8192);
-    expect(ENGINE_OPTIONS[1].thinkingBudget).toBe(16384);
+    expect(ENGINE_OPTIONS.map((e) => e.id)).toEqual([
+      'oss-reasoning',
+      'oss-fast',
+      'gemini-flash',
+      'gemini-pro',
+      'custom-api',
+    ]);
+    expect(ENGINE_OPTIONS[0].providerKind).toBe('open-source');
+    expect(ENGINE_OPTIONS[2].geminiModelId).toBe('gemini-3-flash-preview');
+    expect(ENGINE_OPTIONS[3].geminiModelId).toBe('gemini-4-hydrogen');
+    expect(ENGINE_OPTIONS[2].thinkingBudget).toBe(8192);
+    expect(ENGINE_OPTIONS[3].thinkingBudget).toBe(16384);
+  });
+
+  it('extracts streamed reasoning and content deltas from Groq / OpenRouter / Workers AI chunks', () => {
+    const groqThought = extractOpenAIChunkDelta(
+      JSON.stringify({
+        choices: [{ delta: { reasoning: 'Examining incentives first.' } }],
+      })
+    );
+    expect(groqThought.thoughtDelta).toBe('Examining incentives first.');
+    expect(groqThought.answerDelta).toBe('');
+
+    const openRouterAnswer = extractOpenAIChunkDelta(
+      JSON.stringify({
+        choices: [{ delta: { content: 'Institutional accountability starts with bindings.' } }],
+      })
+    );
+    expect(openRouterAnswer.answerDelta).toBe('Institutional accountability starts with bindings.');
+
+    const workersAiChunk = extractOpenAIChunkDelta(
+      JSON.stringify({ response: 'From first principles.' })
+    );
+    expect(workersAiChunk.answerDelta).toBe('From first principles.');
+  });
+
+  it('routes proxy OSS requests to Cloudflare Workers AI when no external API keys are set', async () => {
+    const encoder = new TextEncoder();
+    const fakeStream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode('data: {"choices":[{"delta":{"content":"Hello from Workers AI"}}]}\n\n')
+        );
+        controller.close();
+      },
+    });
+
+    const req = new Request('https://proxy.test/api/chat', {
+      method: 'POST',
+      headers: { Origin: 'https://aviperera.com', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'oss-reasoning',
+        systemInstruction: 'Be Avi.',
+        contents: [{ role: 'user', parts: [{ text: 'Hello' }] }],
+      }),
+    });
+
+    const res = await handleGeminiProxyRequest(req, {
+      AI: {
+        run: async () => fakeStream,
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('X-Ask-Avi-Protocol')).toBe('openai');
+    expect(res.headers.get('X-Ask-Avi-Model')).toContain('Workers AI');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://aviperera.com');
   });
 
   it('extracts native Gemini thought parts, answer text, web search queries, and grounding chunks', () => {

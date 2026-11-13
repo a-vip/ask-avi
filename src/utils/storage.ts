@@ -1,14 +1,17 @@
 import type { AppSettings, ChatThread, ThemeMode } from '../types/chat';
 
 const THREADS_KEY = 'ask_avi_threads_v1';
-const SETTINGS_KEY = 'ask_avi_settings_v3';
+const SETTINGS_KEY = 'ask_avi_settings_v4';
+const LEGACY_SETTINGS_KEY = 'ask_avi_settings_v3';
 const THEME_KEY = 'ask_avi_theme';
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
-  engineId: 'gemini-flash',
+  engineId: 'oss-reasoning',
   voiceStyle: 'standard',
   webSearchEnabled: true,
+  groqApiKey: '',
+  openRouterApiKey: '',
   geminiApiKey: '',
   proxyUrl: '',
   customApi: {
@@ -52,7 +55,12 @@ export function loadSettings(): AppSettings {
     const params = new URLSearchParams(window.location.search);
     const urlTheme = params.get('theme');
     const raw = localStorage.getItem(SETTINGS_KEY);
-    const stored = raw ? (JSON.parse(raw) as Partial<AppSettings>) : {};
+    const legacyRaw = !raw ? localStorage.getItem(LEGACY_SETTINGS_KEY) : null;
+    const stored = raw
+      ? (JSON.parse(raw) as Partial<AppSettings>)
+      : legacyRaw
+        ? (JSON.parse(legacyRaw) as Partial<AppSettings>)
+        : {};
     const themeFromStorage = localStorage.getItem(THEME_KEY) as ThemeMode | null;
 
     const resolvedTheme: ThemeMode =
@@ -64,9 +72,17 @@ export function loadSettings(): AppSettings {
             ? themeFromStorage
             : 'dark';
 
+    const resolvedEngineId =
+      raw && stored.engineId
+        ? stored.engineId
+        : stored.engineId === 'custom-api'
+          ? 'custom-api'
+          : DEFAULT_SETTINGS.engineId;
+
     return {
       ...DEFAULT_SETTINGS,
       ...stored,
+      engineId: resolvedEngineId,
       theme: resolvedTheme,
       customApi: {
         ...DEFAULT_SETTINGS.customApi,

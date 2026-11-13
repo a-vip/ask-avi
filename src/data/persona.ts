@@ -5,12 +5,31 @@ export const AVI_AVATAR_URL =
 
 export const ENGINE_OPTIONS: EngineOption[] = [
   {
+    id: 'oss-reasoning',
+    name: 'Open-Source Reasoning',
+    shortName: 'OSS Reasoning',
+    badge: '100% Free',
+    providerKind: 'open-source',
+    description:
+      'Default open-weights reasoning stack (GPT-OSS 120B, Qwen3 32B, Nemotron 3 Ultra 550B, Gemma 4 31B, or Cloudflare AI) with live open-web lookup — completely free.',
+  },
+  {
+    id: 'oss-fast',
+    name: 'Open-Source Chat 70B',
+    shortName: 'Llama 3.3 70B',
+    badge: 'Fast · Free',
+    providerKind: 'open-source',
+    description:
+      'Ultra-fast open-weights dialogue (Llama 3.3 70B / Llama 4 Scout / Gemma 4 26B) with high free rate limits and zero cost.',
+  },
+  {
     id: 'gemini-flash',
     name: 'Gemini 3 Flash',
     shortName: 'Gemini 3 Flash',
-    badge: 'Thinking + Web',
+    badge: 'Google',
+    providerKind: 'google',
     description:
-      'Extended thinking (8k reasoning budget) with live web grounding in Avi’s conversational voice.',
+      'Optional Google Gemini 3 Flash extended thinking (8k budget) with live web grounding.',
     geminiModelId: 'gemini-3-flash-preview',
     geminiFallbackModels: [
       'gemini-3-flash-preview',
@@ -24,9 +43,10 @@ export const ENGINE_OPTIONS: EngineOption[] = [
     id: 'gemini-pro',
     name: 'Gemini 4 Hydrogen',
     shortName: 'Gemini 4 Deep',
-    badge: '16k Deep Think',
+    badge: 'Google · Deep',
+    providerKind: 'google',
     description:
-      'Deep extended thinking (16k reasoning budget) with live web grounding for complex philosophy, strategy, law, and coding.',
+      'Optional Google Gemini 4 Hydrogen deep thinking (16k budget) for complex philosophy, strategy, law, and coding.',
     geminiModelId: 'gemini-4-hydrogen',
     geminiFallbackModels: [
       'gemini-4-hydrogen',
@@ -40,9 +60,10 @@ export const ENGINE_OPTIONS: EngineOption[] = [
     id: 'custom-api',
     name: 'Custom API Endpoint',
     shortName: 'Custom API',
-    badge: 'OpenAI-Compatible',
+    badge: 'OpenAI / Local',
+    providerKind: 'custom',
     description:
-      'Optional override to route through another OpenAI-compatible endpoint stored locally in your browser.',
+      'Override with any OpenAI-compatible URL (Ollama, LM Studio, Together, Cerebras, etc.) stored only in your browser.',
   },
 ];
 

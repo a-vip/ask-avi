@@ -72,7 +72,7 @@ export function Sidebar({
 
   const engineStatusLabel = backendConnected
     ? `${activeOption.shortName} · Live Web`
-    : 'Connect Gemini API / Proxy';
+    : 'Connect Free AI / Proxy';
 
   if (!isOpen) return null;
 

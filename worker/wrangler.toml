@@ -1,3 +1,6 @@
 name = "ask-avi-api"
 main = "src/index.ts"
 compatibility_date = "2026-11-01"
+
+[ai]
+binding = "AI"

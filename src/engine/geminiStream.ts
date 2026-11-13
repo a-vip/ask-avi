@@ -83,6 +83,71 @@ export function extractGeminiChunkDelta(payloadJson: string): GeminiChunkDelta {
   return out;
 }
 
+interface RawOpenAIChunk {
+  choices?: Array<{
+    delta?: {
+      content?: string;
+      reasoning?: string;
+      reasoning_content?: string;
+      reasoning_details?: Array<{ text?: string; summary?: string }>;
+    };
+  }>;
+  response?: string;
+  reasoning?: string;
+}
+
+/**
+ * Extracts streamed text and reasoning deltas from OpenAI-compatible SSE chunks
+ * (Groq, OpenRouter, custom endpoints, or Cloudflare Workers AI).
+ */
+export function extractOpenAIChunkDelta(payloadJson: string): GeminiChunkDelta {
+  const out: GeminiChunkDelta = {
+    thoughtDelta: '',
+    answerDelta: '',
+    webSearchQueries: [],
+    webSources: [],
+  };
+
+  let parsed: RawOpenAIChunk;
+  try {
+    parsed = JSON.parse(payloadJson) as RawOpenAIChunk;
+  } catch {
+    return out;
+  }
+
+  const delta = parsed.choices?.[0]?.delta;
+  if (delta) {
+    if (typeof delta.reasoning === 'string' && delta.reasoning.length > 0) {
+      out.thoughtDelta += delta.reasoning;
+    } else if (
+      typeof delta.reasoning_content === 'string' &&
+      delta.reasoning_content.length > 0
+    ) {
+      out.thoughtDelta += delta.reasoning_content;
+    } else if (Array.isArray(delta.reasoning_details)) {
+      for (const item of delta.reasoning_details) {
+        const piece = item.text || item.summary || '';
+        if (piece) out.thoughtDelta += piece;
+      }
+    }
+
+    if (typeof delta.content === 'string' && delta.content.length > 0) {
+      out.answerDelta += delta.content;
+    }
+    return out;
+  }
+
+  // Workers AI fallback format ({ response, reasoning })
+  if (typeof parsed.reasoning === 'string' && parsed.reasoning.length > 0) {
+    out.thoughtDelta += parsed.reasoning;
+  }
+  if (typeof parsed.response === 'string' && parsed.response.length > 0) {
+    out.answerDelta += parsed.response;
+  }
+
+  return out;
+}
+
 export function mergeUniqueQueries(existing: string[], incoming: string[]): string[] {
   if (incoming.length === 0) return existing;
   const set = new Set(existing);

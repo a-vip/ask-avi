@@ -2,14 +2,17 @@
 
 > **Live Preview (GitHub Pages):** https://a-vip.github.io/ask-avi/
 
-**Ask Avi** is a frontier-style conversational AI web application modeled on Avi Perera's published research, international humanitarian law work, software systems, and philosophical essays—powered by **Gemini 3 & 4 Extended Thinking** and live **Google Search / Open-Web Grounding** across the open internet.
+**Ask Avi** is a frontier-style conversational AI web application modeled on Avi Perera's published research, international humanitarian law work, software systems, and philosophical essays—defaulting to **100% Free Open-Source Reasoning** (`GPT-OSS 120B`, `Qwen3 32B`, `Nemotron 3 Ultra 550B`, `Gemma 4 31B`, `Llama 3.3 70B`, or Cloudflare Workers AI) with optional **Google Gemini 3 & 4** models and live web grounding.
 
 ---
 
 ## Key Capabilities
 
-- **Gemini 3 & 4 Frontier Reasoning + Live Web Grounding (`shared/geminiProxy.ts`)**
-  - **Gemini 3 Flash** (`thinkingBudget: 8192`) & **Gemini 4 Hydrogen** (`thinkingBudget: 16384`) with native `includeThoughts: true` reasoning streams and `googleSearch` live internet access (with automatic open-web fallback when a free-tier key has zero native Search Grounding quota).
+- **100% Free Open-Source Default + Automatic Provider Cascade (`shared/geminiProxy.ts`)**
+  - **Open-Source Reasoning (Default):** Runs `openai/gpt-oss-120b` & `qwen/qwen3-32b` on **Groq** ($0 forever, up to 1,000 req/day, no card), `nvidia/nemotron-3-ultra-550b-a55b:free` & `google/gemma-4-31b-it:free` on **OpenRouter** ($0 forever, no card), or built-in **Cloudflare Workers AI** (`env.AI` — 10,000 free Neurons/day, zero external API keys needed!).
+  - **Open-Source Chat 70B:** Ultra-fast `Llama 3.3 70B` / `Llama 4 Scout` / `Gemma 4 26B` with automatic rate-limit failover across free providers.
+  - **Optional Google Gemini:** Keeps **Gemini 3 Flash** (`thinkingBudget: 8192`) & **Gemini 4 Hydrogen** (`thinkingBudget: 16384`) one click away in the model switcher.
+  - **Live Internet Reference Grounding:** Automatically enriches open-source and Google replies with live Wikipedia + Crossref scholarly context (plus native Google Search when billed).
   - **Zero Browser Downloads or Fallback Snippets:** Responds directly in Avi's first-person voice to open-ended philosophical, technical, coding, and current-affairs questions while only citing Avi's archive links when genuinely relevant.
 - **Antigravity / Claude / Gemini Reasoning UI**
   - Live elapsed thinking timer (`Thinking · Ns` → `Thought for Ns`), collapsible vertical reasoning timeline showing Google Search queries run + structured thought steps + clickable web & dossier sources.
@@ -20,27 +23,32 @@
 
 ---
 
-## Deploying the Serverless Gemini Relay (Zero-Key Public Visitors)
+## Deploying the $0 Public Serverless Proxy (Zero-Key Visitors on aviperera.com)
 
-Static GitHub Pages cannot safely store your private `GEMINI_API_KEY`, so visitors on `aviperera.com` and GitHub Pages connect via a lightweight CORS-locked relay included in this repository:
+Static GitHub Pages cannot safely store your private keys, so visitors on `aviperera.com` and GitHub Pages connect via a lightweight CORS-locked relay (`shared/geminiProxy.ts`) included in this repository:
 
-### Option A: Vercel Edge (`api/chat.ts`)
-1. Import `a-vip/ask-avi` on Vercel (or run `vercel --prod`).
-2. Set environment variable `GEMINI_API_KEY` (from Google AI Studio) in Vercel Project Settings.
-3. Copy your endpoint URL (`https://<your-vercel-app>.vercel.app/api/chat`).
-
-### Option B: Cloudflare Workers (`worker/src/index.ts`)
+### Option A: Cloudflare Workers AI (Recommended — $0 Forever, Zero External Keys Required)
+1. Deploy [`worker/src/index.ts`](./worker/src/index.ts) — [`worker/wrangler.toml`](./worker/wrangler.toml) already binds `[ai]` (`10,000 free Neurons/day`, no credit card required):
 ```bash
 cd worker
 npx wrangler deploy
-npx wrangler secret put GEMINI_API_KEY
 ```
+2. *(Optional for higher limits & 120B/550B speed)* Add free secrets from [console.groq.com](https://console.groq.com/keys) and/or [openrouter.ai](https://openrouter.ai/keys):
+```bash
+npx wrangler secret put GROQ_API_KEY
+npx wrangler secret put OPENROUTER_API_KEY
+```
+
+### Option B: Vercel Edge (`api/chat.ts`)
+1. Import `a-vip/ask-avi` on Vercel (or run `vercel --prod`).
+2. Add any free key env vars (`GROQ_API_KEY`, `OPENROUTER_API_KEY`, and optionally `GEMINI_API_KEY`) in Vercel Project Settings.
+3. Copy your endpoint URL (`https://<your-vercel-app>.vercel.app/api/chat`).
 
 ### Connect GitHub Pages to Your Proxy
 In GitHub Repository **Settings → Secrets and variables → Actions → Variables**, add:
-- **`ASK_AVI_API_ENDPOINT`** = `https://<your-proxy-host>/api/chat`
+- **`ASK_AVI_API_ENDPOINT`** = `https://<your-worker-or-vercel-url>`
 
-Then re-run `.github/workflows/deploy.yml` (or push any commit). GitHub Pages at `https://a-vip.github.io/ask-avi/` will immediately connect with zero setup required for visitors. *(While setting up, you can also paste your own Gemini API key into **Settings** in the app for instant personal testing.)*
+Then re-run `.github/workflows/deploy.yml` (or push any commit). Visitors on `aviperera.com` and `https://a-vip.github.io/ask-avi/` immediately chat for free with zero keys or signup required. *(For personal testing right now, you can also paste a free Groq or OpenRouter key directly into **Settings**.)*
 
 ---
 

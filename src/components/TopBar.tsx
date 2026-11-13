@@ -101,7 +101,7 @@ export function TopBar({
                   type="button"
                   className={`web-toggle-chip ${webSearchEnabled ? 'active' : ''}`}
                   onClick={onToggleWebSearch}
-                  title="Toggle live Google Search access"
+                  title="Toggle live internet search & reference grounding"
                 >
                   <Globe size={11} />
                   <span>{webSearchEnabled ? 'Web Search On' : 'Web Search Off'}</span>

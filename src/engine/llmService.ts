@@ -11,41 +11,73 @@ import type {
 import { splitThinkingAndAnswer } from '../utils/thinking';
 import {
   extractGeminiChunkDelta,
+  extractOpenAIChunkDelta,
   mergeUniqueQueries,
   mergeUniqueWebSources,
 } from './geminiStream';
 import { knowledgeIndex } from './rag';
 import { fetchOpenWebFallback } from './webFallback';
 
-const keysWithoutNativeSearch = new Set<string>();
-
-function getKeyFingerprint(apiKey: string): string {
-  return `${apiKey.slice(0, 6)}:${apiKey.length}`;
-}
-
-function formatGeminiErrorMessage(status: number, errBody: string, statusText: string): string {
-  let detail = '';
-  try {
-    const parsed = JSON.parse(errBody) as { error?: { message?: string } };
-    detail = parsed.error?.message?.trim() ?? '';
-  } catch {
-    detail = errBody.trim();
-  }
-  const compact = (detail || statusText).slice(0, 260);
-  if (status === 401 || status === 403) {
-    return `Gemini API authentication failed (${status}): verify your Google AI Studio key in Settings. ${compact}`;
-  }
-  if (status === 429) {
-    return `Gemini API quota/rate limit reached (${status}): check your Google AI Studio billing/rate limits or try again shortly. ${compact}`;
-  }
-  return `Gemini API request failed (${status}): ${compact}`;
-}
-
 export class BackendNotConfiguredError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'BackendNotConfiguredError';
   }
+}
+
+const keysWithoutNativeSearch = new Set<string>();
+
+const GROQ_MODELS_BY_ENGINE: Record<'oss-reasoning' | 'oss-fast', string[]> = {
+  'oss-reasoning': ['openai/gpt-oss-120b', 'qwen/qwen3-32b', 'llama-3.3-70b-versatile'],
+  'oss-fast': ['llama-3.3-70b-versatile', 'openai/gpt-oss-20b', 'llama-3.1-8b-instant'],
+};
+
+const OPENROUTER_MODELS_BY_ENGINE: Record<'oss-reasoning' | 'oss-fast', string[]> = {
+  'oss-reasoning': [
+    'nvidia/nemotron-3-ultra-550b-a55b:free',
+    'google/gemma-4-31b-it:free',
+    'nvidia/nemotron-3.5-super-vl:free',
+    'openrouter/free',
+  ],
+  'oss-fast': [
+    'nvidia/nemotron-3.5-lightning:free',
+    'google/gemma-4-26b-a4b-it:free',
+    'openrouter/free',
+  ],
+};
+
+function getKeyFingerprint(apiKey: string): string {
+  return `${apiKey.slice(0, 6)}:${apiKey.length}`;
+}
+
+function formatApiErrorMessage(
+  provider: string,
+  status: number,
+  errBody: string,
+  statusText: string
+): string {
+  let detail = '';
+  try {
+    const parsed = JSON.parse(errBody) as {
+      error?: { message?: string } | string;
+      message?: string;
+    };
+    if (typeof parsed.error === 'string') {
+      detail = parsed.message || parsed.error;
+    } else {
+      detail = parsed.error?.message?.trim() || parsed.message?.trim() || '';
+    }
+  } catch {
+    detail = errBody.trim();
+  }
+  const compact = (detail || statusText).slice(0, 260);
+  if (status === 401 || status === 403) {
+    return `${provider} authentication failed (${status}): verify your API key in Settings. ${compact}`;
+  }
+  if (status === 429 || status === 402) {
+    return `${provider} free rate limit reached (${status}): add a second free provider key in Settings for automatic failover or try again shortly. ${compact}`;
+  }
+  return `${provider} request failed (${status}): ${compact}`;
 }
 
 export interface StreamProgressPayload {
@@ -63,6 +95,8 @@ export interface StreamGenerateParams {
   engineId: EngineId;
   voiceStyle: VoiceStyle;
   webSearchEnabled: boolean;
+  groqApiKey?: string;
+  openRouterApiKey?: string;
   geminiApiKey?: string;
   proxyUrl?: string;
   attachedContext?: AttachedContext;
@@ -120,6 +154,43 @@ export function resolveEffectiveProxyUrl(customProxyUrl?: string): string {
   return '';
 }
 
+function deriveFollowUps(
+  sources: RetrievedSource[],
+  webSources: WebSource[],
+  answerText: string
+): string[] {
+  if (sources.length > 0) {
+    const first = sources[0]?.entry;
+    if (first) {
+      return [
+        `Where do you see the strongest counter-argument to that view?`,
+        `How would you apply "${first.title.slice(0, 42)}${first.title.length > 42 ? '…' : ''}" to recent events?`,
+      ];
+    }
+  }
+  if (/```/.test(answerText)) {
+    return [
+      'Can we stress-test edge cases or simplify this architecture?',
+      'Walk through the security and failure modes of this approach.',
+    ];
+  }
+  if (webSources.length > 0) {
+    return ['What do you think happens next, and where are the blind spots here?'];
+  }
+  return [];
+}
+
+function formatOpenModelLabel(modelId: string, providerName: string): string {
+  const clean = modelId
+    .replace(':free', '')
+    .replace('@cf/', '')
+    .replace(/^openai\//, '')
+    .replace(/^nvidia\//, '')
+    .replace(/^google\//, '')
+    .replace(/^qwen\//, '');
+  return `${clean} (${providerName})`;
+}
+
 class AviLLMService {
   public async generateReply(params: StreamGenerateParams): Promise<StreamGenerateResult> {
     const recentUserHint = params.history
@@ -128,7 +199,6 @@ class AviLLMService {
       .map((m) => m.content)
       .join(' ');
 
-    // Only pull Avi archive references when genuinely topical (high relevance threshold)
     const { sources, elapsedMs } = knowledgeIndex.search(params.query, {
       topK: 3,
       minScore: 4.5,
@@ -137,16 +207,236 @@ class AviLLMService {
 
     const opt = ENGINE_OPTIONS.find((o) => o.id === params.engineId) ?? ENGINE_OPTIONS[0];
 
-    // 1. Optional Custom OpenAI-Compatible Endpoint (BYOK power users)
     if (
       params.engineId === 'custom-api' &&
       params.customApi?.endpointUrl?.trim() &&
       params.customApi?.modelName?.trim()
     ) {
-      return this.streamCustomOpenAI(params, sources, elapsedMs);
+      return this.generateCustomOpenAIReply(params, sources, elapsedMs);
     }
 
-    // 2. Native Gemini 3 / 4 (Extended Thinking + Live Google Search / Open-Web Fallback)
+    if (opt.providerKind === 'google') {
+      return this.generateGoogleReply(params, opt, sources, elapsedMs);
+    }
+
+    return this.generateOpenSourceReply(
+      params,
+      params.engineId === 'oss-fast' ? 'oss-fast' : 'oss-reasoning',
+      sources,
+      elapsedMs
+    );
+  }
+
+  private async generateOpenSourceReply(
+    params: StreamGenerateParams,
+    tier: 'oss-reasoning' | 'oss-fast',
+    sources: RetrievedSource[],
+    retrievalMs: number
+  ): Promise<StreamGenerateResult> {
+    const groqKey = params.groqApiKey?.trim();
+    const openRouterKey = params.openRouterApiKey?.trim();
+    const proxyUrl = resolveEffectiveProxyUrl(params.proxyUrl);
+
+    if (!groqKey && !openRouterKey && !proxyUrl) {
+      throw new BackendNotConfiguredError(
+        'Connect a 100% free Groq key (console.groq.com) or OpenRouter key (openrouter.ai) in Settings — no credit card required — or deploy the free Cloudflare Workers AI proxy. You can also switch to Google Gemini above.'
+      );
+    }
+
+    let webSearchQueries: string[] = [];
+    let webSources: WebSource[] = [];
+    let liveWebContext = '';
+
+    if (params.webSearchEnabled) {
+      const fallback = await fetchOpenWebFallback(params.query, params.signal);
+      if (fallback.queries.length > 0) webSearchQueries = fallback.queries;
+      if (fallback.webSources.length > 0) {
+        webSources = fallback.webSources;
+        liveWebContext = fallback.contextBlock;
+      }
+    }
+
+    const systemInstruction = buildAviSystemPrompt(
+      params.voiceStyle,
+      sources,
+      params.attachedContext?.content,
+      false,
+      liveWebContext
+    );
+
+    const historyTurns = buildConversationWindow(params.history, 14, 14000);
+    const openAIMessages = [
+      { role: 'system' as const, content: systemInstruction },
+      ...historyTurns.map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+      { role: 'user' as const, content: params.query },
+    ];
+    const temperature = params.voiceStyle === 'academic' ? 0.5 : 0.75;
+
+    let lastProvider = 'Open-Source API';
+    let lastStatus = 502;
+    let lastErrBody = '';
+    let lastStatusText = 'Bad Gateway';
+
+    const tryDirectOpenAIProvider = async (
+      providerName: string,
+      endpoint: string,
+      apiKey: string,
+      models: string[],
+      extraHeaders: Record<string, string>,
+      providerKind: 'groq' | 'openrouter'
+    ): Promise<StreamGenerateResult | null> => {
+      for (const model of models) {
+        if (params.signal?.aborted) return null;
+        const payload: Record<string, unknown> = {
+          model,
+          messages: openAIMessages,
+          stream: true,
+          temperature,
+          max_tokens: 4096,
+        };
+        if (
+          providerKind === 'groq' &&
+          (model.startsWith('openai/gpt-oss') || model.startsWith('qwen/qwen3'))
+        ) {
+          payload.reasoning_format = 'parsed';
+          payload.reasoning_effort = model.startsWith('openai/gpt-oss') ? 'high' : 'default';
+        }
+
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+            ...extraHeaders,
+          },
+          signal: params.signal,
+          body: JSON.stringify(payload),
+        });
+
+        if (res.ok && res.body) {
+          return this.consumeSseResponse({
+            response: res,
+            protocol: 'openai',
+            engineUsed: params.engineId,
+            modelLabel: formatOpenModelLabel(model, providerName),
+            sources,
+            retrievalMs,
+            initialQueries: webSearchQueries,
+            initialWebSources: webSources,
+            onUpdate: params.onUpdate,
+          });
+        }
+
+        lastProvider = providerName;
+        lastStatus = res.status;
+        lastStatusText = res.statusText;
+        lastErrBody = await res.text().catch(() => '');
+        if (lastStatus !== 404 && lastStatus !== 429 && lastStatus !== 503 && lastStatus !== 402) {
+          break;
+        }
+      }
+      return null;
+    };
+
+    if (groqKey) {
+      const groqResult = await tryDirectOpenAIProvider(
+        'Groq',
+        'https://api.groq.com/openai/v1/chat/completions',
+        groqKey,
+        GROQ_MODELS_BY_ENGINE[tier],
+        {},
+        'groq'
+      );
+      if (groqResult) return groqResult;
+    }
+
+    if (openRouterKey) {
+      const originRef =
+        typeof window !== 'undefined' ? window.location.origin : 'https://aviperera.com';
+      const orResult = await tryDirectOpenAIProvider(
+        'OpenRouter',
+        'https://openrouter.ai/api/v1/chat/completions',
+        openRouterKey,
+        OPENROUTER_MODELS_BY_ENGINE[tier],
+        {
+          'HTTP-Referer': originRef,
+          'X-Title': 'Ask Avi',
+        },
+        'openrouter'
+      );
+      if (orResult) return orResult;
+    }
+
+    if (proxyUrl) {
+      const contents = [
+        ...historyTurns.map((m) => ({
+          role: m.role === 'assistant' ? ('model' as const) : ('user' as const),
+          parts: [{ text: m.content }],
+        })),
+        { role: 'user' as const, parts: [{ text: params.query }] },
+      ];
+      const proxyRes = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: params.signal,
+        body: JSON.stringify({
+          mode: tier,
+          systemInstruction,
+          contents,
+          enableSearch: params.webSearchEnabled,
+          temperature,
+        }),
+      });
+      if (proxyRes.ok && proxyRes.body) {
+        const protocolHeader = proxyRes.headers.get('X-Ask-Avi-Protocol');
+        const modelHeader = proxyRes.headers.get('X-Ask-Avi-Model');
+        return this.consumeSseResponse({
+          response: proxyRes,
+          protocol: protocolHeader === 'gemini' ? 'gemini' : 'openai',
+          engineUsed: params.engineId,
+          modelLabel: modelHeader || 'Open-Source Cloud Proxy',
+          sources,
+          retrievalMs,
+          initialQueries: webSearchQueries,
+          initialWebSources: webSources,
+          onUpdate: params.onUpdate,
+        });
+      }
+
+      lastProvider = 'Proxy API';
+      lastStatus = proxyRes.status;
+      lastStatusText = proxyRes.statusText;
+      lastErrBody = await proxyRes.text().catch(() => '');
+
+      if (
+        lastStatus === 503 &&
+        (lastErrBody.includes('proxy_unconfigured') || lastErrBody.includes('GROQ_API_KEY'))
+      ) {
+        throw new BackendNotConfiguredError(
+          'Proxy is live — bind Cloudflare Workers AI [ai] or add a free Groq/OpenRouter key in Settings.'
+        );
+      }
+      if (lastStatus === 404 && !groqKey && !openRouterKey) {
+        throw new BackendNotConfiguredError(
+          'Add a 100% free Groq key (console.groq.com) or OpenRouter key (openrouter.ai) in Settings — no credit card required — or deploy the Cloudflare Workers AI proxy.'
+        );
+      }
+    }
+
+    throw new Error(
+      formatApiErrorMessage(lastProvider, lastStatus, lastErrBody, lastStatusText)
+    );
+  }
+
+  private async generateGoogleReply(
+    params: StreamGenerateParams,
+    opt: (typeof ENGINE_OPTIONS)[number],
+    sources: RetrievedSource[],
+    retrievalMs: number
+  ): Promise<StreamGenerateResult> {
     const candidateModels = opt.geminiFallbackModels?.length
       ? opt.geminiFallbackModels
       : [opt.geminiModelId ?? 'gemini-3-flash-preview'];
@@ -157,7 +447,7 @@ class AviLLMService {
 
     if (!directKey && !proxyUrl) {
       throw new BackendNotConfiguredError(
-        'Connect your Gemini API key in Settings (or configure ASK_AVI_API_ENDPOINT to your Vercel/Cloudflare proxy) to enable live thinking and internet search.'
+        'Connect your Gemini API key in Settings — or switch back to the 100% free Open-Source Reasoning engine.'
       );
     }
 
@@ -253,8 +543,6 @@ class AviLLMService {
         lastStatusText = response.statusText;
         lastErrBody = await response.text().catch(() => '');
 
-        // Free-tier Google AI Studio keys often have 0 quota for native googleSearch tool;
-        // degrade cleanly to CORS open-web search + full Gemini reasoning without Instant Archive.
         if (nativeSearchAllowed && (lastStatus === 429 || lastStatus === 403 || lastStatus === 400)) {
           nativeSearchAllowed = false;
           keysWithoutNativeSearch.add(fingerprint);
@@ -278,6 +566,7 @@ class AviLLMService {
         headers: { 'Content-Type': 'application/json' },
         signal: params.signal,
         body: JSON.stringify({
+          mode: 'google',
           model: primaryModelId,
           systemInstruction: buildInstruction(),
           contents,
@@ -300,122 +589,36 @@ class AviLLMService {
         (lastErrBody.includes('proxy_unconfigured') || lastErrBody.includes('GEMINI_API_KEY'))
       ) {
         throw new BackendNotConfiguredError(
-          'Serverless proxy is live, awaiting GEMINI_API_KEY configuration—or paste a personal Gemini API key in Settings to test right away.'
+          'Proxy is live, awaiting API key configuration — paste a free Groq/OpenRouter or Gemini key in Settings.'
         );
       }
       if (lastStatus === 404 && !directKey) {
         throw new BackendNotConfiguredError(
-          'No live API backend is connected at this origin yet. Add a Gemini API key or serverless proxy URL in Settings.'
+          'No live API backend connected at this origin yet. Add a free Groq/OpenRouter or Gemini key in Settings.'
         );
       }
-      throw new Error(formatGeminiErrorMessage(lastStatus, lastErrBody, lastStatusText));
+      throw new Error(formatApiErrorMessage('Gemini API', lastStatus, lastErrBody, lastStatusText));
     }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    const startedAt = Date.now();
-    let thinkingEndedAt = 0;
+    const protocolHeader = response.headers.get('X-Ask-Avi-Protocol');
+    const modelHeader = response.headers.get('X-Ask-Avi-Model');
+    const resolvedModelLabel =
+      modelHeader || (activeModelId === primaryModelId ? opt.shortName : activeModelId);
 
-    let buffer = '';
-    let accumulatedThoughts = '';
-    let accumulatedAnswer = '';
-
-    const emitUpdate = (stillThinking: boolean) => {
-      const now = Date.now();
-      const thinkingMs = thinkingEndedAt
-        ? thinkingEndedAt - startedAt
-        : now - startedAt;
-      params.onUpdate({
-        content: accumulatedAnswer,
-        thoughts: accumulatedThoughts,
-        isThinking: stillThinking,
-        thinkingMs,
-        webSearchQueries,
-        webSources,
-      });
-    };
-
-    emitUpdate(true);
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        const data = trimmed.slice(5).trim();
-        if (!data || data === '[DONE]') continue;
-
-        const delta = extractGeminiChunkDelta(data);
-        let changed = false;
-
-        if (delta.thoughtDelta) {
-          accumulatedThoughts += delta.thoughtDelta;
-          changed = true;
-        }
-        if (delta.answerDelta) {
-          if (!accumulatedAnswer && !thinkingEndedAt) {
-            thinkingEndedAt = Date.now();
-          }
-          accumulatedAnswer += delta.answerDelta;
-          changed = true;
-        }
-        if (delta.webSearchQueries.length > 0) {
-          webSearchQueries = mergeUniqueQueries(webSearchQueries, delta.webSearchQueries);
-          changed = true;
-        }
-        if (delta.webSources.length > 0) {
-          webSources = mergeUniqueWebSources(webSources, delta.webSources);
-          changed = true;
-        }
-
-        if (changed) {
-          emitUpdate(accumulatedAnswer.length === 0);
-        }
-      }
-    }
-
-    const leftover = buffer.trim();
-    if (leftover.startsWith('data:')) {
-      const data = leftover.slice(5).trim();
-      if (data && data !== '[DONE]') {
-        const delta = extractGeminiChunkDelta(data);
-        if (delta.thoughtDelta) accumulatedThoughts += delta.thoughtDelta;
-        if (delta.answerDelta) {
-          if (!accumulatedAnswer && !thinkingEndedAt) thinkingEndedAt = Date.now();
-          accumulatedAnswer += delta.answerDelta;
-        }
-        if (delta.webSearchQueries.length > 0) {
-          webSearchQueries = mergeUniqueQueries(webSearchQueries, delta.webSearchQueries);
-        }
-        if (delta.webSources.length > 0) {
-          webSources = mergeUniqueWebSources(webSources, delta.webSources);
-        }
-      }
-    }
-
-    const finalThinkingMs = (thinkingEndedAt || Date.now()) - startedAt;
-
-    return {
-      content: accumulatedAnswer,
-      thoughts: accumulatedThoughts,
-      isThinking: false,
-      thinkingMs: finalThinkingMs,
-      webSearchQueries,
-      webSources,
+    return this.consumeSseResponse({
+      response,
+      protocol: protocolHeader === 'openai' ? 'openai' : 'gemini',
       engineUsed: params.engineId,
-      modelLabel: activeModelId === primaryModelId ? opt.shortName : activeModelId,
+      modelLabel: resolvedModelLabel,
       sources,
-      retrievalMs: elapsedMs,
-      followUps: deriveFollowUps(sources, webSources, accumulatedAnswer),
-    };
+      retrievalMs,
+      initialQueries: webSearchQueries,
+      initialWebSources: webSources,
+      onUpdate: params.onUpdate,
+    });
   }
 
-  private async streamCustomOpenAI(
+  private async generateCustomOpenAIReply(
     params: StreamGenerateParams,
     sources: RetrievedSource[],
     retrievalMs: number
@@ -453,15 +656,107 @@ class AviLLMService {
     });
 
     if (!res.ok || !res.body) {
-      throw new Error(`Custom API returned ${res.status} ${res.statusText}`);
+      const errBody = await res.text().catch(() => '');
+      throw new Error(formatApiErrorMessage('Custom API', res.status, errBody, res.statusText));
     }
 
-    const reader = res.body.getReader();
+    return this.consumeSseResponse({
+      response: res,
+      protocol: 'openai',
+      engineUsed: 'custom-api',
+      modelLabel: cfg.modelName,
+      sources,
+      retrievalMs,
+      initialQueries: [],
+      initialWebSources: [],
+      onUpdate: params.onUpdate,
+    });
+  }
+
+  private async consumeSseResponse(opts: {
+    response: Response;
+    protocol: 'gemini' | 'openai';
+    engineUsed: EngineId;
+    modelLabel: string;
+    sources: RetrievedSource[];
+    retrievalMs: number;
+    initialQueries: string[];
+    initialWebSources: WebSource[];
+    onUpdate: (update: StreamProgressPayload) => void;
+  }): Promise<StreamGenerateResult> {
+    const reader = opts.response.body!.getReader();
     const decoder = new TextDecoder();
     const startedAt = Date.now();
-    let buffer = '';
-    let rawAccumulated = '';
     let thinkingEndedAt = 0;
+
+    let buffer = '';
+    let structuredThoughts = '';
+    let rawAnswer = '';
+    let webSearchQueries = [...opts.initialQueries];
+    let webSources = [...opts.initialWebSources];
+
+    const computeViewState = () => {
+      if (opts.protocol === 'openai' && !structuredThoughts && /^\s*<(?:thought|think)\b/i.test(rawAnswer)) {
+        const split = splitThinkingAndAnswer(rawAnswer);
+        return {
+          thoughts: split.thinking,
+          answer: split.answer,
+          isThinking: split.answer.length === 0,
+        };
+      }
+      const cleanAnswer =
+        opts.protocol === 'openai'
+          ? rawAnswer.replace(/<\/?(?:thought|think)\b[^>]*>/gi, '').replace(/^\s+/, '')
+          : rawAnswer;
+      return {
+        thoughts: structuredThoughts.trimStart(),
+        answer: cleanAnswer,
+        isThinking: cleanAnswer.length === 0,
+      };
+    };
+
+    const emitCurrent = () => {
+      const state = computeViewState();
+      if (state.answer.length > 0 && !thinkingEndedAt) {
+        thinkingEndedAt = Date.now();
+      }
+      opts.onUpdate({
+        content: state.answer,
+        thoughts: state.thoughts,
+        isThinking: state.isThinking,
+        thinkingMs: (thinkingEndedAt || Date.now()) - startedAt,
+        webSearchQueries,
+        webSources,
+      });
+    };
+
+    const applyChunk = (data: string): boolean => {
+      const delta =
+        opts.protocol === 'gemini'
+          ? extractGeminiChunkDelta(data)
+          : extractOpenAIChunkDelta(data);
+
+      let changed = false;
+      if (delta.thoughtDelta) {
+        structuredThoughts += delta.thoughtDelta;
+        changed = true;
+      }
+      if (delta.answerDelta) {
+        rawAnswer += delta.answerDelta;
+        changed = true;
+      }
+      if (delta.webSearchQueries.length > 0) {
+        webSearchQueries = mergeUniqueQueries(webSearchQueries, delta.webSearchQueries);
+        changed = true;
+      }
+      if (delta.webSources.length > 0) {
+        webSources = mergeUniqueWebSources(webSources, delta.webSources);
+        changed = true;
+      }
+      return changed;
+    };
+
+    emitCurrent();
 
     while (true) {
       const { value, done } = await reader.read();
@@ -474,85 +769,38 @@ class AviLLMService {
         const trimmed = line.trim();
         if (!trimmed.startsWith('data:')) continue;
         const data = trimmed.slice(5).trim();
-        if (data === '[DONE]') continue;
-        try {
-          const parsed = JSON.parse(data) as {
-            choices?: Array<{
-              delta?: { content?: string; reasoning_content?: string };
-            }>;
-          };
-          const deltaText = parsed.choices?.[0]?.delta?.content ?? '';
-          const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning_content ?? '';
-          if (deltaReasoning && !rawAccumulated.startsWith('<thought>')) {
-            rawAccumulated = `<thought>${deltaReasoning}`;
-          } else if (deltaReasoning) {
-            rawAccumulated += deltaReasoning;
-          }
-          if (deltaText) {
-            if (rawAccumulated.startsWith('<thought>') && !rawAccumulated.includes('</thought>') && deltaReasoning === '') {
-              rawAccumulated += `</thought>\n`;
-            }
-            rawAccumulated += deltaText;
-          }
-          const split = splitThinkingAndAnswer(rawAccumulated);
-          if (split.answer && !thinkingEndedAt) thinkingEndedAt = Date.now();
-          params.onUpdate({
-            content: split.answer,
-            thoughts: split.thinking,
-            isThinking: split.isThinking,
-            thinkingMs: (thinkingEndedAt || Date.now()) - startedAt,
-            webSearchQueries: [],
-            webSources: [],
-          });
-        } catch {
-          // Ignore partial SSE chunk
+        if (!data || data === '[DONE]') continue;
+        if (applyChunk(data)) {
+          emitCurrent();
         }
       }
     }
 
-    const finalSplit = splitThinkingAndAnswer(rawAccumulated);
-    const thinkingMs = (thinkingEndedAt || Date.now()) - startedAt;
+    const leftover = buffer.trim();
+    if (leftover.startsWith('data:')) {
+      const data = leftover.slice(5).trim();
+      if (data && data !== '[DONE]') {
+        applyChunk(data);
+      }
+    }
+
+    const finalState = computeViewState();
+    const finalThinkingMs = (thinkingEndedAt || Date.now()) - startedAt;
 
     return {
-      content: finalSplit.answer || rawAccumulated,
-      thoughts: finalSplit.thinking,
+      content: finalState.answer,
+      thoughts: finalState.thoughts,
       isThinking: false,
-      thinkingMs,
-      webSearchQueries: [],
-      webSources: [],
-      engineUsed: 'custom-api',
-      modelLabel: cfg.modelName,
-      sources,
-      retrievalMs,
-      followUps: deriveFollowUps(sources, [], finalSplit.answer || rawAccumulated),
+      thinkingMs: finalThinkingMs,
+      webSearchQueries,
+      webSources,
+      engineUsed: opts.engineUsed,
+      modelLabel: opts.modelLabel,
+      sources: opts.sources,
+      retrievalMs: opts.retrievalMs,
+      followUps: deriveFollowUps(opts.sources, webSources, finalState.answer),
     };
   }
-}
-
-function deriveFollowUps(
-  sources: RetrievedSource[],
-  webSources: WebSource[],
-  answerText: string
-): string[] {
-  if (sources.length > 0) {
-    const first = sources[0]?.entry;
-    if (first) {
-      return [
-        `Where do you see the strongest counter-argument to that view?`,
-        `How would you apply "${first.title.slice(0, 42)}${first.title.length > 42 ? '…' : ''}" to recent events?`,
-      ];
-    }
-  }
-  if (/```/.test(answerText)) {
-    return [
-      'Can we stress-test edge cases or simplify this architecture?',
-      'Walk through the security and failure modes of this approach.',
-    ];
-  }
-  if (webSources.length > 0) {
-    return ['What do you think happens next, and where are the blind spots here?'];
-  }
-  return [];
 }
 
 export const llmService = new AviLLMService();

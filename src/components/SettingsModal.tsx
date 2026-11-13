@@ -54,29 +54,51 @@ export function SettingsModal({
           <section className="settings-section">
             <div className="settings-section-title">
               <Sparkles size={16} />
-              <h3>Gemini 3 &amp; 4 Thinking + Live Web Search</h3>
+              <h3>Free Open-Source AI Providers (Default · No Card Required)</h3>
             </div>
             <p className="settings-desc">
-              Powers open-ended philosophical, technical, and current-affairs conversations in Avi&apos;s voice using extended reasoning and live web grounding.
+              Runs open-weights reasoning flagships (<code>GPT-OSS 120B</code>, <code>Qwen3 32B</code>,{' '}
+              <code>Nemotron 3 Ultra 550B</code>, <code>Gemma 4 31B</code>, <code>Llama 3.3 70B</code>) completely free. Connect one or both for automatic failover across rate limits, plus live open-web grounding.
             </p>
 
             <div className="settings-form-grid">
               <label>
                 <span>
-                  Gemini API Key (saved only in your browser — get a key at{' '}
-                  <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">
-                    Google AI Studio
+                  Groq Free Key — up to 1,000 req/day, ultra-fast (get a $0 key at{' '}
+                  <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer">
+                    console.groq.com/keys
                   </a>
                   )
                 </span>
                 <input
                   type="password"
-                  value={settings.geminiApiKey}
-                  placeholder="AQ... or AIza..."
+                  value={settings.groqApiKey}
+                  placeholder="gsk_..."
                   onChange={(e) =>
                     onUpdateSettings({
                       ...settings,
-                      geminiApiKey: e.target.value,
+                      groqApiKey: e.target.value,
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                <span>
+                  OpenRouter Free Key — 550B &amp; Gemma 4 <code>:free</code> models (get a $0 key at{' '}
+                  <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">
+                    openrouter.ai/keys
+                  </a>
+                  )
+                </span>
+                <input
+                  type="password"
+                  value={settings.openRouterApiKey}
+                  placeholder="sk-or-v1-..."
+                  onChange={(e) =>
+                    onUpdateSettings({
+                      ...settings,
+                      openRouterApiKey: e.target.value,
                     })
                   }
                 />
@@ -85,7 +107,7 @@ export function SettingsModal({
               <label className="settings-toggle-row">
                 <span className="toggle-label-wrap">
                   <Globe size={14} />
-                  <span>Live Google Search Grounding (entire internet access)</span>
+                  <span>Live Internet Search &amp; Reference Grounding</span>
                 </span>
                 <input
                   type="checkbox"
@@ -104,12 +126,11 @@ export function SettingsModal({
           <section className="settings-section">
             <div className="settings-section-title">
               <Server size={16} />
-              <h3>Public Serverless Proxy (For aviperera.com Visitors)</h3>
+              <h3>Zero-Key Public Proxy for aviperera.com Visitors</h3>
             </div>
             <p className="settings-desc">
-              For zero-key public access on <code>aviperera.com</code> and GitHub Pages, deploy the included{' '}
-              <code>api/chat.ts</code> (Vercel) or <code>worker/src/index.ts</code> (Cloudflare Workers) with your{' '}
-              <code>GEMINI_API_KEY</code> env variable and set <code>ASK_AVI_API_ENDPOINT</code> in GitHub repository variables (or override below).
+              For visitors on <code>aviperera.com</code> with zero API keys needed on their side, deploy{' '}
+              <code>worker/src/index.ts</code> (Cloudflare Workers AI gives <strong>10,000 free Neurons/day</strong> built in via <code>[ai]</code> with zero external keys, plus optional <code>GROQ_API_KEY</code> / <code>OPENROUTER_API_KEY</code> / <code>GEMINI_API_KEY</code>) or <code>api/chat.ts</code> (Vercel), then set <code>ASK_AVI_API_ENDPOINT</code> in GitHub repository variables.
             </p>
             <div className="settings-form-grid">
               <label>
@@ -117,11 +138,43 @@ export function SettingsModal({
                 <input
                   type="url"
                   value={settings.proxyUrl}
-                  placeholder="https://ask-avi-api.vercel.app/api/chat"
+                  placeholder="https://ask-avi-api.<your-subdomain>.workers.dev"
                   onChange={(e) =>
                     onUpdateSettings({
                       ...settings,
                       proxyUrl: e.target.value,
+                    })
+                  }
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="settings-section">
+            <div className="settings-section-title">
+              <Sparkles size={16} />
+              <h3>Google Gemini (Optional Model Switcher Option)</h3>
+            </div>
+            <p className="settings-desc">
+              Powers the optional <code>Gemini 3 Flash</code> &amp; <code>Gemini 4 Hydrogen</code> entries in the top model dropdown.
+            </p>
+            <div className="settings-form-grid">
+              <label>
+                <span>
+                  Gemini API Key (saved only in your browser —{' '}
+                  <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">
+                    Google AI Studio
+                  </a>
+                  )
+                </span>
+                <input
+                  type="password"
+                  value={settings.geminiApiKey}
+                  placeholder="AQ... or AIza..."
+                  onChange={(e) =>
+                    onUpdateSettings({
+                      ...settings,
+                      geminiApiKey: e.target.value,
                     })
                   }
                 />

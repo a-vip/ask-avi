@@ -70,10 +70,16 @@ export default function App() {
   const shouldAutoScrollRef = useRef(true);
 
   const backendConnected = useMemo(() => {
+    const proxyReady = Boolean(resolveEffectiveProxyUrl(settings.proxyUrl));
     if (settings.engineId === 'custom-api') {
       return Boolean(settings.customApi.endpointUrl.trim() && settings.customApi.modelName.trim());
     }
-    return Boolean(settings.geminiApiKey.trim() || resolveEffectiveProxyUrl(settings.proxyUrl));
+    if (settings.engineId === 'gemini-flash' || settings.engineId === 'gemini-pro') {
+      return Boolean(settings.geminiApiKey.trim() || proxyReady);
+    }
+    return Boolean(
+      settings.groqApiKey.trim() || settings.openRouterApiKey.trim() || proxyReady
+    );
   }, [settings]);
 
   const activeThread = useMemo(() => {
@@ -207,6 +213,8 @@ export default function App() {
           engineId: engineToUse,
           voiceStyle: settings.voiceStyle,
           webSearchEnabled: settings.webSearchEnabled,
+          groqApiKey: settings.groqApiKey,
+          openRouterApiKey: settings.openRouterApiKey,
           geminiApiKey: settings.geminiApiKey,
           proxyUrl: settings.proxyUrl,
           attachedContext: attached ?? undefined,
@@ -283,6 +291,8 @@ export default function App() {
       settings.engineId,
       settings.voiceStyle,
       settings.webSearchEnabled,
+      settings.groqApiKey,
+      settings.openRouterApiKey,
       settings.geminiApiKey,
       settings.proxyUrl,
       settings.customApi,

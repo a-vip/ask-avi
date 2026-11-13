@@ -1,6 +1,13 @@
 export type ThemeMode = 'dark' | 'light';
 
-export type EngineId = 'gemini-flash' | 'gemini-pro' | 'custom-api';
+export type EngineId =
+  | 'oss-reasoning'
+  | 'oss-fast'
+  | 'gemini-flash'
+  | 'gemini-pro'
+  | 'custom-api';
+
+export type EngineProviderKind = 'open-source' | 'google' | 'custom';
 
 export type VoiceStyle = 'standard' | 'blunt' | 'academic' | 'mentor';
 
@@ -92,6 +99,7 @@ export interface EngineOption {
   shortName: string;
   badge: string;
   description: string;
+  providerKind: EngineProviderKind;
   geminiModelId?: GeminiModelId;
   geminiFallbackModels?: GeminiModelId[];
   thinkingBudget?: number;
@@ -108,6 +116,8 @@ export interface AppSettings {
   engineId: EngineId;
   voiceStyle: VoiceStyle;
   webSearchEnabled: boolean;
+  groqApiKey: string;
+  openRouterApiKey: string;
   geminiApiKey: string;
   proxyUrl: string;
   customApi: CustomApiConfig;

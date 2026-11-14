@@ -30,11 +30,13 @@ if (!is_array($body) || empty($body['contents']) || !is_array($body['contents'])
 $mode = (string) ($body['mode'] ?? 'oss-reasoning');
 $temperature = isset($body['temperature']) ? (float) $body['temperature'] : 0.72;
 $temperature = max(0.0, min(1.3, $temperature));
+$isAuthenticated = ($reqUser !== null);
+$maxSystemChars = $isAuthenticated ? 18000 : 10500;
 $systemInstruction = trim((string) ($body['systemInstruction'] ?? ''));
 if (function_exists('mb_substr')) {
-  $systemInstruction = mb_substr($systemInstruction, 0, 18000, 'UTF-8');
+  $systemInstruction = mb_substr($systemInstruction, 0, $maxSystemChars, 'UTF-8');
 } else {
-  $systemInstruction = substr($systemInstruction, 0, 18000);
+  $systemInstruction = substr($systemInstruction, 0, $maxSystemChars);
 }
 
 function ask_avi_clip_text(string $text, int $limit): string {
@@ -44,19 +46,21 @@ function ask_avi_clip_text(string $text, int $limit): string {
   return substr($text, 0, $limit);
 }
 
-function ask_avi_to_openai_messages(array $contents, string $system): array {
+function ask_avi_to_openai_messages(array $contents, string $system, bool $isAuthenticated = false): array {
   $msgs = [];
   if ($system !== '') {
     $msgs[] = ['role' => 'system', 'content' => $system];
   }
-  $tail = array_slice($contents, -18);
+  $maxTurns = $isAuthenticated ? 18 : 12;
+  $maxPartChars = $isAuthenticated ? 10000 : 6000;
+  $tail = array_slice($contents, -$maxTurns);
   foreach ($tail as $turn) {
     $role = (($turn['role'] ?? 'user') === 'model') ? 'assistant' : 'user';
     $parts = $turn['parts'] ?? [];
     $texts = [];
     foreach ($parts as $p) {
       if (isset($p['text']) && is_string($p['text'])) {
-        $texts[] = ask_avi_clip_text($p['text'], 10000);
+        $texts[] = ask_avi_clip_text($p['text'], $maxPartChars);
       }
     }
     $joined = trim(implode("\n", $texts));
@@ -165,7 +169,7 @@ if ($mode === 'google') {
     ask_avi_record_chat_telemetry(null, 401, 'gemini', $latencyMs, 'auth_required: Gemini models require a signed-in account');
     ask_avi_send_json(401, [
       'error' => 'auth_required',
-      'message' => 'Sign in or create a free account to use Gemini models.',
+      'message' => 'Sign in or create a free account to unlock frontier models and larger context limits.',
     ]);
   }
 
@@ -289,7 +293,7 @@ if ($groqKey === '' && $openRouterKey === '') {
   ]);
 }
 
-$messages = ask_avi_to_openai_messages($body['contents'], $systemInstruction);
+$messages = ask_avi_to_openai_messages($body['contents'], $systemInstruction, $isAuthenticated);
 $isFast = ($mode === 'oss-fast');
 $groqModels = $isFast
   ? ['qwen/qwen3.8-27b', 'openai/gpt-oss-20b', 'openai/gpt-oss-120b']

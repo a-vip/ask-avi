@@ -3,8 +3,33 @@ import type { AttachedContext, AttachedContextKind } from '../types/chat';
 
 export const MAX_CONTEXT_ITEMS = 4;
 export const MAX_FILE_BYTES = 12 * 1024 * 1024;
-export const MAX_CHARS_PER_ITEM = 3600;
-export const MAX_TOTAL_CONTEXT_CHARS = 8000;
+export const MAX_CHARS_PER_ITEM = 4000;
+export const MAX_TOTAL_CONTEXT_CHARS = 10000;
+
+export const GUEST_MAX_CONTEXT_ITEMS = 2;
+export const GUEST_MAX_CHARS_PER_ITEM = 2200;
+export const GUEST_MAX_TOTAL_CONTEXT_CHARS = 3600;
+
+export interface ContextBudgetLimits {
+  maxItems: number;
+  maxCharsPerItem: number;
+  maxTotalChars: number;
+}
+
+export function getContextBudgetLimits(isAuthenticated = true): ContextBudgetLimits {
+  return isAuthenticated
+    ? {
+        maxItems: MAX_CONTEXT_ITEMS,
+        maxCharsPerItem: MAX_CHARS_PER_ITEM,
+        maxTotalChars: MAX_TOTAL_CONTEXT_CHARS,
+      }
+    : {
+        maxItems: GUEST_MAX_CONTEXT_ITEMS,
+        maxCharsPerItem: GUEST_MAX_CHARS_PER_ITEM,
+        maxTotalChars: GUEST_MAX_TOTAL_CONTEXT_CHARS,
+      };
+}
+
 const MAX_PDF_PAGES_SCANNED = 25;
 const MAX_SLIDES_SCANNED = 40;
 
@@ -54,15 +79,19 @@ export interface BudgetAllocationResult {
   trimmedAny: boolean;
 }
 
-export function allocateContextBudget(items: AttachedContext[]): BudgetAllocationResult {
-  const capped = items.slice(0, MAX_CONTEXT_ITEMS);
+export function allocateContextBudget(
+  items: AttachedContext[],
+  isAuthenticated = true
+): BudgetAllocationResult {
+  const limits = getContextBudgetLimits(isAuthenticated);
+  const capped = items.slice(0, limits.maxItems);
   if (capped.length === 0) {
     return { items: [], totalChars: 0, estimatedTokens: 0, trimmedAny: false };
   }
 
-  // First pass: compact every item against MAX_CHARS_PER_ITEM
+  // First pass: compact every item against maxCharsPerItem
   const firstPass = capped.map((item) => {
-    const compacted = compactContextText(item.content, MAX_CHARS_PER_ITEM);
+    const compacted = compactContextText(item.content, limits.maxCharsPerItem);
     const orig = Math.max(item.originalChars ?? 0, compacted.originalChars);
     return {
       item: {
@@ -78,10 +107,10 @@ export function allocateContextBudget(items: AttachedContext[]): BudgetAllocatio
   const combinedLen = firstPass.reduce((sum, entry) => sum + entry.len, 0);
   let finalItems = firstPass.map((entry) => entry.item);
 
-  if (combinedLen > MAX_TOTAL_CONTEXT_CHARS) {
-    // Fair-share water-filling across attachments so total stays <= MAX_TOTAL_CONTEXT_CHARS
-    const baseCap = Math.floor(MAX_TOTAL_CONTEXT_CHARS / firstPass.length);
-    let remainingBudget = MAX_TOTAL_CONTEXT_CHARS;
+  if (combinedLen > limits.maxTotalChars) {
+    // Fair-share water-filling across attachments so total stays <= limits.maxTotalChars
+    const baseCap = Math.floor(limits.maxTotalChars / firstPass.length);
+    let remainingBudget = limits.maxTotalChars;
     const lengths = new Array<number>(firstPass.length).fill(0);
 
     // Give small items what they already need first
@@ -125,8 +154,11 @@ export function allocateContextBudget(items: AttachedContext[]): BudgetAllocatio
   };
 }
 
-export function formatContextsForPrompt(items: AttachedContext[]): string {
-  const { items: budgeted, estimatedTokens } = allocateContextBudget(items);
+export function formatContextsForPrompt(
+  items: AttachedContext[],
+  isAuthenticated = true
+): string {
+  const { items: budgeted, estimatedTokens } = allocateContextBudget(items, isAuthenticated);
   if (budgeted.length === 0) return '';
 
   const blocks = budgeted.map((item, idx) => {

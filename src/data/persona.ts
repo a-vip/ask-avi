@@ -213,8 +213,8 @@ export function buildAviSystemPrompt(
   const trimmedAttached = attachedSnippet?.trim() ?? '';
   const attachedBlock = trimmedAttached
     ? trimmedAttached.startsWith('USER-ATTACHED CONTEXT')
-      ? `\n\n${trimmedAttached.slice(0, 8800)}`
-      : `\n\nUSER-ATTACHED DOCUMENT (respond directly to this):\n${trimmedAttached.slice(0, 8800)}`
+      ? `\n\n${trimmedAttached.slice(0, 11000)}`
+      : `\n\nUSER-ATTACHED DOCUMENT (respond directly to this):\n${trimmedAttached.slice(0, 11000)}`
     : '';
 
   const webBlock = liveWebContext?.trim() ? `\n\n${liveWebContext.trim()}` : '';

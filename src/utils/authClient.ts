@@ -7,6 +7,7 @@ export interface AuthConfigResponse {
   ok: boolean;
   googleEnabled: boolean;
   googleClientId: string;
+  geminiConfigured?: boolean;
   wpSsoEnabled: boolean;
   wpLoginUrl?: string;
   wpLogoutUrl?: string;

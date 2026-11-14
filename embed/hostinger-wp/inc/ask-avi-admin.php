@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
  * provision database tables, and purge LiteSpeed caches on new theme version rollout.
  */
 add_action('init', static function () {
-  if (get_option('ask_avi_deployment_ver') === '20261114c') {
+  if (get_option('ask_avi_deployment_ver') === '20261114d') {
     return;
   }
 
@@ -45,7 +45,7 @@ add_action('init', static function () {
     }
   }
 
-  update_option('ask_avi_deployment_ver', '20261114c', false);
+  update_option('ask_avi_deployment_ver', '20261114d', false);
   flush_rewrite_rules(false);
   do_action('litespeed_purge_all');
   if (class_exists('\LiteSpeed\Purge')) {
@@ -140,6 +140,24 @@ add_action('admin_post_ask_avi_export_csv', static function () {
   exit;
 });
 
+add_action('admin_post_ask_avi_delete_user', static function () {
+  if (!current_user_can('manage_options')) {
+    wp_die('Unauthorized');
+  }
+  $user_id = sanitize_text_field(wp_unslash($_POST['user_id'] ?? ''));
+  if ($user_id === '') {
+    wp_safe_redirect(admin_url('admin.php?page=ask-avi-admin&deleted=0'));
+    exit;
+  }
+  check_admin_referer('ask_avi_delete_user_' . $user_id);
+
+  global $wpdb;
+  $users_table = $wpdb->prefix . 'ask_avi_users';
+  $deleted = $wpdb->delete($users_table, ['id' => $user_id], ['%s']);
+  wp_safe_redirect(admin_url('admin.php?page=ask-avi-admin&deleted=' . ($deleted ? '1' : '0')));
+  exit;
+});
+
 function ask_avi_render_admin_page(): void {
   if (!current_user_can('manage_options')) {
     return;
@@ -223,6 +241,8 @@ function ask_avi_render_admin_page(): void {
 
     <?php if ($saved): ?>
       <div class="notice notice-success is-dismissible"><p>Ask Avi backend keys saved securely in WordPress options.</p></div>
+    <?php elseif (isset($_GET['deleted']) && $_GET['deleted'] === '1'): ?>
+      <div class="notice notice-success is-dismissible"><p>User record removed from Ask Avi directory.</p></div></div>
     <?php endif; ?>
 
     <form method="post" style="background:#fff;padding:18px;border:1px solid #ccd0d4;border-radius:6px;margin-bottom:24px;">
@@ -293,11 +313,12 @@ function ask_avi_render_admin_page(): void {
           <th>Chats (Errors)</th>
           <th>Signed Up</th>
           <th>Last Seen</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody id="ask-avi-users-tbody">
         <?php if (empty($users)): ?>
-          <tr><td colspan="9">No registered users yet.</td></tr>
+          <tr><td colspan="10">No registered users yet.</td></tr>
         <?php else: foreach ($users as $u): ?>
           <tr data-search="<?php echo esc_attr(strtolower($u['name'] . ' ' . $u['email'] . ' ' . $u['provider'])); ?>">
             <td><strong><?php echo esc_html($u['name']); ?></strong></td>
@@ -309,6 +330,14 @@ function ask_avi_render_admin_page(): void {
             <td><?php echo (int) $u['chat_count']; ?> (<?php echo (int) $u['error_count']; ?> err)</td>
             <td><?php echo esc_html(gmdate('Y-m-d H:i', (int) floor(((int) $u['created_at']) / 1000)) . ' UTC'); ?></td>
             <td><?php echo esc_html(gmdate('Y-m-d H:i', (int) floor(((int) $u['last_seen_at']) / 1000)) . ' UTC'); ?></td>
+            <td>
+              <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline;" onsubmit="return confirm('Remove this Ask Avi account record?');">
+                <input type="hidden" name="action" value="ask_avi_delete_user" />
+                <input type="hidden" name="user_id" value="<?php echo esc_attr($u['id']); ?>" />
+                <?php wp_nonce_field('ask_avi_delete_user_' . $u['id']); ?>
+                <button type="submit" class="button button-small button-link-delete">Remove</button>
+              </form>
+            </td>
           </tr>
         <?php endforeach; endif; ?>
       </tbody>

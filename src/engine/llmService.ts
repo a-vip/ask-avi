@@ -40,7 +40,8 @@ function resolveAttachedPromptBlock(params: StreamGenerateParams): string {
       : params.attachedContext
         ? [params.attachedContext]
         : [];
-  return formatContextsForPrompt(list);
+  const isAuthed = Boolean(params.isAuthenticated ?? params.sessionToken);
+  return formatContextsForPrompt(list, isAuthed);
 }
 
 const keysWithoutNativeSearch = new Set<string>();
@@ -118,6 +119,7 @@ export interface StreamGenerateParams {
   geminiApiKey?: string;
   proxyUrl?: string;
   sessionToken?: string;
+  isAuthenticated?: boolean;
   attachedContext?: AttachedContext;
   attachedContexts?: AttachedContext[];
   customApi?: CustomApiConfig;
@@ -623,7 +625,7 @@ class AviLLMService {
     if (!response || !response.ok || !response.body) {
       if (lastStatus === 401 || lastErrBody.includes('auth_required')) {
         throw new AuthRequiredError(
-          'Sign in or create a free account to unlock Google Gemini models. Free open-source models remain open to everyone.'
+          'Sign in or create a free account to unlock frontier models and larger context limits.'
         );
       }
       if (

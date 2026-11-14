@@ -21,6 +21,8 @@ import {
   compactContextText,
   extractFileContext,
   formatContextsForPrompt,
+  GUEST_MAX_CONTEXT_ITEMS,
+  GUEST_MAX_TOTAL_CONTEXT_CHARS,
   MAX_CONTEXT_ITEMS,
   MAX_TOTAL_CONTEXT_CHARS,
 } from '../src/utils/contextExtractor';
@@ -369,6 +371,18 @@ describe('Thread Storage & Export Helpers', () => {
     expect(sysPrompt).toContain('[Context 3 · LINK: Doc 3]');
     expect(sysPrompt).toContain(small);
     expect(sysPrompt).not.toContain('USER-ATTACHED DOCUMENT');
+
+    const guestResult = allocateContextBudget(
+      [
+        { id: 'g1', title: 'G1', content: huge1, kind: 'pdf' },
+        { id: 'g2', title: 'G2', content: huge2, kind: 'doc' },
+        { id: 'g3', title: 'G3', content: small, kind: 'text' },
+      ],
+      false
+    );
+    expect(guestResult.items.length).toBe(GUEST_MAX_CONTEXT_ITEMS);
+    expect(guestResult.totalChars).toBeLessThanOrEqual(GUEST_MAX_TOTAL_CONTEXT_CHARS);
+    expect(guestResult.totalChars).toBeLessThan(result.totalChars);
   });
 
   it('extracts text cleanly from .docx, .pptx, and .xlsx fixtures', async () => {

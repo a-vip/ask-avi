@@ -13,6 +13,7 @@ const PORT = Number(process.env.PORT || 4173);
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
@@ -72,11 +73,14 @@ async function handleApiRequest(
   }
 
   const body = preReadBody ?? (await readBodyBuffer(req));
+  let forwardBody: Uint8Array | undefined = body;
   if (req.method === 'POST' && body) {
     try {
       const parsed = JSON.parse(Buffer.from(body).toString('utf8')) as {
         mode?: string;
         model?: string;
+        systemInstruction?: string;
+        contents?: Array<{ role?: string; parts?: Array<{ text?: string }> }>;
       };
       const isGoogleMode =
         parsed.mode === 'google' ||
@@ -86,11 +90,29 @@ async function handleApiRequest(
         res.end(
           JSON.stringify({
             error: 'auth_required',
-            message: 'Sign in or create a free account to use Gemini models.',
+            message: 'Sign in or create a free account to unlock frontier models and larger context limits.',
           })
         );
         return;
       }
+
+      const maxSysChars = bearerUser ? 18000 : 10500;
+      const maxTurns = bearerUser ? 18 : 12;
+      const maxPartChars = bearerUser ? 10000 : 6000;
+      if (typeof parsed.systemInstruction === 'string') {
+        parsed.systemInstruction = parsed.systemInstruction.slice(0, maxSysChars);
+      }
+      if (Array.isArray(parsed.contents)) {
+        parsed.contents = parsed.contents.slice(-maxTurns).map((turn) => ({
+          ...turn,
+          parts: Array.isArray(turn.parts)
+            ? turn.parts.map((p) =>
+                typeof p?.text === 'string' ? { ...p, text: p.text.slice(0, maxPartChars) } : p
+              )
+            : turn.parts,
+        }));
+      }
+      forwardBody = Buffer.from(JSON.stringify(parsed), 'utf8');
     } catch {
       // Let proxy validate malformed JSON
     }
@@ -99,7 +121,7 @@ async function handleApiRequest(
   const webRequest = new Request(`http://127.0.0.1:${PORT}${req.url ?? '/api/chat'}`, {
     method: req.method,
     headers,
-    body: body ? Buffer.from(body) : undefined,
+    body: forwardBody ? Buffer.from(forwardBody) : undefined,
   });
 
   const env: ProxyEnv = {

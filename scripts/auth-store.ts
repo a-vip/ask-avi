@@ -217,7 +217,7 @@ function verifyAdminPasscode(candidate?: string): { ok: boolean; reason?: string
     return {
       ok: false,
       reason:
-        'Admin email passcode is not configured on this server (set ASK_AVI_ADMIN_PASSCODE in .env.local or sign in with Google/WordPress).',
+        'Admin email passcode is not configured on this server (set ASK_AVI_ADMIN_PASSCODE in .env.local or sign in with Google).',
     };
   }
   if (!candidate || !constantTimeEquals(candidate.trim(), configured)) {
@@ -414,6 +414,7 @@ export async function handleAuthRequest(
       ok: true,
       googleEnabled: Boolean(process.env.GOOGLE_CLIENT_ID?.trim()),
       googleClientId: process.env.GOOGLE_CLIENT_ID?.trim() || '',
+      geminiConfigured: Boolean(process.env.GEMINI_API_KEY?.trim()),
       wpSsoEnabled: false,
       serverConfigured: Boolean(
         process.env.GROQ_API_KEY?.trim() || process.env.OPENROUTER_API_KEY?.trim()

@@ -216,8 +216,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     'ok' => true,
     'googleEnabled' => !empty($settings['google_client_id']),
     'googleClientId' => (string) ($settings['google_client_id'] ?? ''),
-    'wpSsoEnabled' => true,
-    'wpLoginUrl' => $wpLoginUrl,
+    'geminiConfigured' => !empty($settings['gemini_api_key']),
+    'wpSsoEnabled' => false,
+    'wpLoginUrl' => '',
     'wpLogoutUrl' => $wpLogoutUrl,
     'wpAdminUrl' => $wpAdminUrl,
     'serverConfigured' => !empty($settings['groq_api_key']) || !empty($settings['openrouter_api_key']),
@@ -288,7 +289,9 @@ if ($action === 'google') {
       'chat_count' => 0,
       'error_count' => 0,
     ];
-    ask_avi_insert_user_row($users_table, $existing);
+    if (!ask_avi_insert_user_row($users_table, $existing)) {
+      ask_avi_send_json(500, ['ok' => false, 'error' => 'Could not create your Google account right now.']);
+    }
   } else {
     $wpdb->update($users_table, [
       'name' => $name,
@@ -350,7 +353,7 @@ if ($action === 'signup' || $action === 'signin') {
       ask_avi_send_json(403, [
         'ok' => false,
         'error' => $configuredPasscode === ''
-          ? 'Set Admin Passcode in WP Admin -> Ask Avi, or sign in via Google/WordPress.'
+          ? 'Set Admin Passcode in WP Admin -> Ask Avi, or sign in via Google.'
           : 'Invalid admin verification passcode for workwithavip@gmail.com.',
       ]);
     }

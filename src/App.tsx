@@ -15,7 +15,7 @@ import {
   reportClientTelemetry,
   type AuthConfigResponse,
 } from './utils/authClient';
-import { allocateContextBudget, MAX_CONTEXT_ITEMS } from './utils/contextExtractor';
+import { allocateContextBudget, getContextBudgetLimits } from './utils/contextExtractor';
 import type {
   AppSettings,
   AttachedContext,
@@ -177,12 +177,19 @@ export default function App() {
     }
   }, [isAuthenticated, settings.engineId]);
 
-  const handleRequireSignIn = useCallback((pendingEngineId?: EngineId) => {
+  useEffect(() => {
+    setAttachedContexts((prev) =>
+      prev.length > 0 ? allocateContextBudget(prev, isAuthenticated).items : prev
+    );
+  }, [isAuthenticated]);
+
+  const handleRequireSignIn = useCallback((pendingEngineId?: EngineId, customNotice?: string) => {
     setPendingEngineAfterAuth(pendingEngineId ?? null);
     setSignInNotice(
-      pendingEngineId
-        ? 'Sign in or create a free account to unlock Google Gemini models. Free open-source models remain open without an account.'
-        : ''
+      customNotice ??
+        (pendingEngineId
+          ? 'Sign in or create a free account to unlock frontier models and larger context limits.'
+          : '')
     );
     setSignInOpen(true);
   }, []);
@@ -322,6 +329,7 @@ export default function App() {
           geminiApiKey: settings.geminiApiKey,
           proxyUrl: settings.proxyUrl,
           sessionToken: userProfile?.sessionToken,
+          isAuthenticated,
           attachedContexts: attached,
           customApi: settings.customApi,
           signal: controller.signal,
@@ -432,7 +440,7 @@ export default function App() {
         return;
       }
 
-      const allocated = allocateContextBudget(attachedContexts).items;
+      const allocated = allocateContextBudget(attachedContexts, isAuthenticated).items;
       const userMsg: ChatMessage = {
         id: makeId('u'),
         role: 'user',
@@ -636,9 +644,10 @@ export default function App() {
       kind: 'dossier',
     };
     setAttachedContexts((prev) => {
+      const limits = getContextBudgetLimits(isAuthenticated);
       const deduped = prev.filter((item) => item.id !== nextItem.id);
-      const next = [...deduped, nextItem].slice(-MAX_CONTEXT_ITEMS);
-      return allocateContextBudget(next).items;
+      const next = [...deduped, nextItem].slice(-limits.maxItems);
+      return allocateContextBudget(next, isAuthenticated).items;
     });
   };
 
@@ -778,7 +787,9 @@ export default function App() {
                 setSettings((prev) => ({ ...prev, voiceStyle }))
               }
               attachedContexts={attachedContexts}
-              onAttachContexts={(items) => setAttachedContexts(allocateContextBudget(items).items)}
+              onAttachContexts={(items) =>
+                setAttachedContexts(allocateContextBudget(items, isAuthenticated).items)
+              }
               onOpenDossierPicker={() => {
                 setDrawerTab('archive');
                 setKnowledgeOpen(true);
@@ -838,7 +849,9 @@ export default function App() {
                 setSettings((prev) => ({ ...prev, voiceStyle }))
               }
               attachedContexts={attachedContexts}
-              onAttachContexts={(items) => setAttachedContexts(allocateContextBudget(items).items)}
+              onAttachContexts={(items) =>
+                setAttachedContexts(allocateContextBudget(items, isAuthenticated).items)
+              }
               onOpenDossierPicker={() => {
                 setDrawerTab('archive');
                 setKnowledgeOpen(true);

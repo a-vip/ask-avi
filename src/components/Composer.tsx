@@ -22,9 +22,10 @@ import { ENGINE_OPTIONS, VOICE_STYLES } from '../data/persona';
 import type { AttachedContext, EngineId, VoiceStyle } from '../types/chat';
 import {
   allocateContextBudget,
+  estimateTokens,
   extractFileContext,
   fetchUrlContext,
-  MAX_CONTEXT_ITEMS,
+  getContextBudgetLimits,
   SUPPORTED_FILE_ACCEPT,
 } from '../utils/contextExtractor';
 
@@ -48,7 +49,7 @@ interface ComposerProps {
   onOpenDossierPicker: () => void;
   isAdmin?: boolean;
   isAuthenticated?: boolean;
-  onRequireSignIn?: (pendingEngineId?: EngineId) => void;
+  onRequireSignIn?: (pendingEngineId?: EngineId, customNotice?: string) => void;
   proxyUrl?: string;
   sessionToken?: string;
   centered?: boolean;
@@ -125,12 +126,14 @@ export function Composer({
       : attachedContext
         ? [attachedContext]
         : [];
-  const budget = allocateContextBudget(rawContexts);
+  const limits = getContextBudgetLimits(isAuthenticated);
+  const budget = allocateContextBudget(rawContexts, isAuthenticated);
   const items = budget.items;
-  const remainingSlots = Math.max(0, MAX_CONTEXT_ITEMS - items.length);
+  const remainingSlots = Math.max(0, limits.maxItems - items.length);
+  const maxTokenLabel = `~${estimateTokens(limits.maxTotalChars).toLocaleString()} tok`;
 
   const commitContexts = (next: AttachedContext[]) => {
-    const allocated = allocateContextBudget(next).items;
+    const allocated = allocateContextBudget(next, isAuthenticated).items;
     if (onAttachContexts) {
       onAttachContexts(allocated);
     } else if (onAttachContext) {
@@ -184,7 +187,8 @@ export function Composer({
     if (files.length === 0) return;
 
     if (remainingSlots <= 0) {
-      setAttachError(`Up to ${MAX_CONTEXT_ITEMS} context items can be attached per message.`);
+      const upgradeHint = !isAuthenticated ? ' Sign in free for up to 4 items (~2.5k tok).' : '';
+      setAttachError(`Up to ${limits.maxItems} context items can be attached per message.${upgradeHint}`);
       return;
     }
 
@@ -209,7 +213,7 @@ export function Composer({
       }
 
       if (files.length > chosen.length) {
-        failures.push(`Only the first ${chosen.length} file(s) fit the ${MAX_CONTEXT_ITEMS}-item cap.`);
+        failures.push(`Only the first ${chosen.length} file(s) fit the ${limits.maxItems}-item cap.`);
       }
 
       if (failures.length > 0) {
@@ -225,7 +229,8 @@ export function Composer({
   const handleAddLink = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (remainingSlots <= 0) {
-      setAttachError(`Up to ${MAX_CONTEXT_ITEMS} context items can be attached per message.`);
+      const upgradeHint = !isAuthenticated ? ' Sign in free for up to 4 items (~2.5k tok).' : '';
+      setAttachError(`Up to ${limits.maxItems} context items can be attached per message.${upgradeHint}`);
       return;
     }
     setAttachError('');
@@ -334,9 +339,9 @@ export function Composer({
             })}
             <span
               className="attached-budget-pill"
-              title="Automatically compacted to keep token usage and API quotas healthy (max 4 items, ~2,000 tokens combined)"
+              title={`Automatically compacted to keep token usage healthy (${isAuthenticated ? 'account' : 'guest'} limit: up to ${limits.maxItems} items, ${maxTokenLabel} combined)`}
             >
-              {items.length}/{MAX_CONTEXT_ITEMS} · ~{budget.estimatedTokens} tok
+              {items.length}/{limits.maxItems} · ~{budget.estimatedTokens} tok
               {budget.trimmedAny ? ' · compacted' : ''}
             </span>
           </div>
@@ -378,9 +383,25 @@ export function Composer({
                 <div className="composer-popover composer-popover-context">
                   <div className="popover-context-meta">
                     <span>
-                      Attach context ({items.length}/{MAX_CONTEXT_ITEMS})
+                      Attach context ({items.length}/{limits.maxItems})
                     </span>
-                    <span className="popover-budget-hint">Auto-compacted ≤2k tok</span>
+                    {!isAuthenticated ? (
+                      <button
+                        type="button"
+                        className="popover-unlock-btn"
+                        onClick={() => {
+                          setAttachOpen(false);
+                          onRequireSignIn?.(
+                            undefined,
+                            'Create a free account for 4 attachments (~2.5k tok), Gemini frontier models, and synced chats.'
+                          );
+                        }}
+                      >
+                        Unlock 4 items →
+                      </button>
+                    ) : (
+                      <span className="popover-budget-hint">Auto-compacted ≤2.5k tok</span>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -577,7 +598,7 @@ export function Composer({
                         </div>
                         <p className="model-option-desc">
                           {locked
-                            ? `${opt.description} Sign in or create a free account to unlock.`
+                            ? `${opt.description} Unlock free with an account.`
                             : opt.description}
                         </p>
                       </button>

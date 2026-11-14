@@ -325,7 +325,8 @@ describe('Minimalist Frontier UI Upgrades', () => {
 
     expect(container.querySelectorAll('.auth-field').length).toBe(3);
     expect(container.querySelector('.auth-optin-card')).toBeTruthy();
-    expect(container.textContent).toContain('Continue with aviperera.com WordPress');
+    expect(container.querySelector('.auth-perks-strip')).toBeTruthy();
+    expect(container.textContent).not.toContain('Continue with aviperera.com WordPress');
     cleanup();
   });
 
@@ -389,7 +390,7 @@ describe('Minimalist Frontier UI Upgrades', () => {
     );
 
     expect(guestComposer.container.querySelectorAll('.attached-chip').length).toBe(2);
-    expect(guestComposer.container.querySelector('.attached-budget-pill')?.textContent).toContain('2/4');
+    expect(guestComposer.container.querySelector('.attached-budget-pill')?.textContent).toContain('2/2');
     expect(guestComposer.container.textContent).toContain('DOSSIER');
     expect(guestComposer.container.textContent).toContain('LINK');
 
@@ -411,6 +412,16 @@ describe('Minimalist Frontier UI Upgrades', () => {
     });
     expect(guestComposer.container.textContent).toContain('Upload PDF, Docs, Slides, Text');
     expect(guestComposer.container.textContent).toContain('Add web link (URL)');
+    expect(guestComposer.container.textContent).toContain('Unlock 4 items');
+
+    const unlockBtn = guestComposer.container.querySelector<HTMLButtonElement>('.popover-unlock-btn');
+    act(() => {
+      unlockBtn?.click();
+    });
+    expect(onRequireSignIn).toHaveBeenCalledWith(
+      undefined,
+      expect.stringContaining('4 attachments')
+    );
 
     const modelBtn = guestComposer.container.querySelector<HTMLButtonElement>('.composer-model-btn');
     act(() => {
@@ -445,13 +456,18 @@ describe('Minimalist Frontier UI Upgrades', () => {
         onOpenSettings={vi.fn()}
         voiceStyle="standard"
         onChangeVoiceStyle={vi.fn()}
-        attachedContexts={[]}
+        attachedContexts={[
+          { id: 'a1', title: 'Doc 1', content: 'Signed-in context allowance', kind: 'doc' },
+        ]}
         onAttachContexts={vi.fn()}
         onOpenDossierPicker={vi.fn()}
         isAuthenticated
         onRequireSignIn={vi.fn()}
       />
     );
+
+    expect(authedComposer.container.querySelector('.attached-budget-pill')?.textContent).toContain('1/4');
+    expect(authedComposer.container.textContent).not.toContain('Unlock 4 items');
 
     act(() => {
       authedComposer.container.querySelector<HTMLButtonElement>('.composer-model-btn')?.click();
@@ -509,14 +525,18 @@ describe('Minimalist Frontier UI Upgrades', () => {
       <SignInModal
         isOpen
         currentProfile={null}
-        pendingNotice="Sign in to unlock Google Gemini models."
+        pendingNotice="Unlock frontier models and 2.5x larger context limits."
         onClose={vi.fn()}
         onSignIn={vi.fn()}
         onSignOut={vi.fn()}
       />
     );
-    expect(noticeModal.container.querySelector('.auth-pending-notice')?.textContent).toContain(
-      'Sign in to unlock Google Gemini models.'
+    expect(noticeModal.container.querySelector('.auth-pending-notice')).toBeNull();
+    expect(noticeModal.container.querySelector('.auth-subtitle')?.textContent).toContain(
+      'Unlock frontier models and 2.5x larger context limits.'
+    );
+    expect(noticeModal.container.querySelector('.auth-perks-strip')?.textContent).toContain(
+      '2.5× larger context'
     );
     noticeModal.cleanup();
   });

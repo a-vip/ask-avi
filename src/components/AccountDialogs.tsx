@@ -10,6 +10,7 @@ import {
   Lock,
   Mail,
   ShieldCheck,
+  Sparkles,
   User,
   UserCheck,
   X,
@@ -241,14 +242,16 @@ export function SignInModal({
               {currentProfile
                 ? 'Account'
                 : authTab === 'signup'
-                  ? 'Create your account'
+                  ? 'Create your free account'
                   : 'Sign in to Ask Avi'}
             </h2>
             {!currentProfile && (
               <p className="auth-subtitle">
-                {authTab === 'signup'
-                  ? 'Save your profile and optionally receive new essays & dispatches.'
-                  : 'Access your profile and synced preferences across sessions.'}
+                {pendingNotice
+                  ? pendingNotice
+                  : authTab === 'signup'
+                    ? 'Unlock Gemini frontier models, 2.5× larger context limits, and synced chats.'
+                    : 'Access Gemini frontier models, larger context limits, and synced history.'}
               </p>
             )}
           </div>
@@ -316,12 +319,20 @@ export function SignInModal({
             </div>
           ) : (
             <>
-              {pendingNotice && (
-                <div className="auth-pending-notice" role="status">
-                  <Lock size={14} />
-                  <span>{pendingNotice}</span>
-                </div>
-              )}
+              <div className="auth-perks-strip" aria-label="Included with a free account">
+                <span className="auth-perk-item">
+                  <Sparkles size={12} />
+                  <span>Gemini frontier models</span>
+                </span>
+                <span className="auth-perk-dot" aria-hidden="true">·</span>
+                <span className="auth-perk-item">
+                  <span>2.5× larger context</span>
+                </span>
+                <span className="auth-perk-dot" aria-hidden="true">·</span>
+                <span className="auth-perk-item">
+                  <span>Synced history</span>
+                </span>
+              </div>
 
               <div className="auth-mode-tabs" role="tablist">
                 <button
@@ -350,21 +361,14 @@ export function SignInModal({
                 </button>
               </div>
 
-              {(googleClientId || (authConfig?.wpSsoEnabled && authConfig.wpLoginUrl)) && (
+              {googleClientId && (
                 <div className="auth-sso-group">
-                  {googleClientId && !googleLoadFailed && (
+                  {!googleLoadFailed ? (
                     <div ref={googleBtnRef} className="google-gsi-slot" />
-                  )}
-                  {googleClientId && googleLoadFailed && (
+                  ) : (
                     <p className="settings-desc">
                       Google Sign-In could not load in this browser context. Continue with email below.
                     </p>
-                  )}
-                  {authConfig?.wpSsoEnabled && authConfig.wpLoginUrl && (
-                    <a href={authConfig.wpLoginUrl} className="wp-sso-btn">
-                      <UserCheck size={15} />
-                      <span>Continue with aviperera.com WordPress</span>
-                    </a>
                   )}
                   <div className="auth-divider">
                     <span>or continue with email</span>

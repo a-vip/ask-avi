@@ -10,8 +10,21 @@ export interface AuthConfigResponse {
   wpSsoEnabled: boolean;
   wpLoginUrl?: string;
   wpLogoutUrl?: string;
+  wpAdminUrl?: string;
+  serverConfigured?: boolean;
   hasAdminPasscode: boolean;
   currentUser: UserProfile | null;
+}
+
+export interface ServerKeysUpdatePayload {
+  groqApiKey?: string;
+  openRouterApiKey?: string;
+  geminiApiKey?: string;
+  googleClientId?: string;
+  adminPasscode?: string;
+  clearKeys?: Array<
+    'groqApiKey' | 'openRouterApiKey' | 'geminiApiKey' | 'googleClientId' | 'adminPasscode'
+  >;
 }
 
 export interface AdminOverviewUser {
@@ -217,6 +230,34 @@ export async function fetchAdminOverview(
     throw new Error(data.error || `Failed to load admin overview (${res.status}).`);
   }
   return data;
+}
+
+export async function saveServerSettings(
+  payload: ServerKeysUpdatePayload,
+  sessionToken?: string,
+  customProxyUrl?: string
+): Promise<AdminOverviewResponse['serverKeys']> {
+  const authUrl = resolveEffectiveAuthUrl(customProxyUrl);
+  if (!authUrl) {
+    throw new Error('Live backend server endpoint is unavailable on this static origin.');
+  }
+  const res = await fetch(authUrl, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+    },
+    body: JSON.stringify({
+      action: 'save_server_settings',
+      ...payload,
+    }),
+  });
+  const data = await parseAuthJson<{ serverKeys?: AdminOverviewResponse['serverKeys'] }>(res);
+  if (!res.ok || !data.ok || !data.serverKeys) {
+    throw new Error(data.error || `Failed to save server keys (${res.status}).`);
+  }
+  return data.serverKeys;
 }
 
 export async function reportClientTelemetry(

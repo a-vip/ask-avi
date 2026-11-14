@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  ExternalLink,
   FileText,
   Globe,
   KeyRound,
@@ -25,6 +26,7 @@ interface MessageBubbleProps {
   message: ChatMessage;
   isLastAssistant: boolean;
   isAdmin?: boolean;
+  wpAdminUrl?: string;
   onEditUserMessage: (messageId: string, newContent: string) => void;
   onRegenerate: (assistantMessageId: string) => void;
   onFollowUpClick: (prompt: string) => void;
@@ -37,6 +39,7 @@ export function MessageBubble({
   message,
   isLastAssistant,
   isAdmin = false,
+  wpAdminUrl,
   onEditUserMessage,
   onRegenerate,
   onFollowUpClick,
@@ -343,10 +346,23 @@ export function MessageBubble({
                 : 'Ask Avi could not reach the response service right now. Please try again in a moment.'}
             </p>
             {isAdmin ? (
-              <button type="button" className="btn-primary-sm" onClick={onOpenSettings}>
-                <KeyRound size={14} />
-                <span>Open Admin API Settings</span>
-              </button>
+              <div className="setup-prompt-actions">
+                <button type="button" className="btn-primary-sm" onClick={onOpenSettings}>
+                  <KeyRound size={14} />
+                  <span>Open Admin API Settings</span>
+                </button>
+                {wpAdminUrl && (
+                  <a
+                    href={wpAdminUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-secondary-sm"
+                  >
+                    <ExternalLink size={14} />
+                    <span>WP Admin Dashboard</span>
+                  </a>
+                )}
+              </div>
             ) : (
               <button
                 type="button"

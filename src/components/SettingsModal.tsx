@@ -6,6 +6,7 @@ import {
   Code2,
   Copy,
   Download,
+  ExternalLink,
   Globe,
   KeyRound,
   Moon,
@@ -28,38 +29,46 @@ import {
   exportUsersAsCsv,
   fetchAdminOverview,
   isVerifiedAdmin,
+  saveServerSettings,
   type AdminOverviewResponse,
+  type AuthConfigResponse,
 } from '../utils/authClient';
 
 type SettingsTab = 'general' | 'admin' | 'developer';
 
 interface SettingsModalProps {
   isOpen: boolean;
+  initialTab?: SettingsTab;
   settings: AppSettings;
   theme?: 'dark' | 'light';
   userProfile?: UserProfile | null;
+  authConfig?: AuthConfigResponse | null;
   onClose: () => void;
   onUpdateSettings: (next: AppSettings) => void;
   onToggleTheme?: () => void;
   onOpenSignIn?: () => void;
   onClearAllThreads?: () => void;
   onExportAllThreads?: () => void;
+  onRefreshAuthConfig?: () => void;
 }
 
 export function SettingsModal({
   isOpen,
+  initialTab = 'general',
   settings,
   theme = 'dark',
   userProfile = null,
+  authConfig = null,
   onClose,
   onUpdateSettings,
   onToggleTheme,
   onOpenSignIn,
   onClearAllThreads,
   onExportAllThreads,
+  onRefreshAuthConfig,
 }: SettingsModalProps) {
   const isAdmin = isVerifiedAdmin(userProfile);
-  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [copiedEmbed, setCopiedEmbed] = useState(false);
   const [confirmClearChats, setConfirmClearChats] = useState(false);
 
@@ -67,6 +76,15 @@ export function SettingsModal({
   const [overviewLoading, setOverviewLoading] = useState(false);
   const [overviewError, setOverviewError] = useState('');
   const [logFilter, setLogFilter] = useState<'all' | 'errors'>('all');
+
+  const [serverGroq, setServerGroq] = useState('');
+  const [serverOpenRouter, setServerOpenRouter] = useState('');
+  const [serverGemini, setServerGemini] = useState('');
+  const [serverGoogleClientId, setServerGoogleClientId] = useState('');
+  const [serverAdminPasscode, setServerAdminPasscode] = useState('');
+  const [savingServerKeys, setSavingServerKeys] = useState(false);
+  const [serverSaveMessage, setServerSaveMessage] = useState('');
+  const [serverSaveError, setServerSaveError] = useState('');
 
   const loadAdminOverview = useCallback(async () => {
     if (!isAdmin) return;
@@ -87,15 +105,21 @@ export function SettingsModal({
   useEffect(() => {
     if (!isOpen) {
       setConfirmClearChats(false);
+      setServerSaveMessage('');
+      setServerSaveError('');
       return;
     }
+    setActiveTab(isAdmin ? initialTab : 'general');
+  }, [initialTab, isAdmin, isOpen]);
+
+  useEffect(() => {
     if (!isAdmin && activeTab !== 'general') {
       setActiveTab('general');
     }
-  }, [activeTab, isAdmin, isOpen]);
+  }, [activeTab, isAdmin]);
 
   useEffect(() => {
-    if (isOpen && isAdmin && activeTab === 'admin') {
+    if (isOpen && isAdmin && (activeTab === 'admin' || activeTab === 'developer')) {
       void loadAdminOverview();
     }
   }, [activeTab, isAdmin, isOpen, loadAdminOverview]);
@@ -134,6 +158,52 @@ export function SettingsModal({
     anchor.download = `ask-avi-users-${new Date().toISOString().slice(0, 10)}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleSaveServerKeys = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (savingServerKeys) return;
+    setServerSaveMessage('');
+    setServerSaveError('');
+
+    const payload = {
+      ...(serverGroq.trim() ? { groqApiKey: serverGroq.trim() } : {}),
+      ...(serverOpenRouter.trim() ? { openRouterApiKey: serverOpenRouter.trim() } : {}),
+      ...(serverGemini.trim() ? { geminiApiKey: serverGemini.trim() } : {}),
+      ...(serverGoogleClientId.trim() ? { googleClientId: serverGoogleClientId.trim() } : {}),
+      ...(serverAdminPasscode.trim() ? { adminPasscode: serverAdminPasscode.trim() } : {}),
+    };
+
+    if (Object.keys(payload).length === 0) {
+      setServerSaveError('Enter at least one API key or credential to save to the live server.');
+      return;
+    }
+
+    setSavingServerKeys(true);
+    try {
+      const nextKeys = await saveServerSettings(
+        payload,
+        userProfile?.sessionToken,
+        settings.proxyUrl
+      );
+      setOverview((prev) => (prev ? { ...prev, serverKeys: nextKeys } : prev));
+      setServerGroq('');
+      setServerOpenRouter('');
+      setServerGemini('');
+      setServerGoogleClientId('');
+      setServerAdminPasscode('');
+      setServerSaveMessage(
+        'Saved to the live server! Anyone visiting aviperera.com/ask-avi/ can now chat without logging in or entering keys.'
+      );
+      onRefreshAuthConfig?.();
+      void loadAdminOverview();
+    } catch (err) {
+      setServerSaveError(
+        err instanceof Error ? err.message : 'Unable to save server settings.'
+      );
+    } finally {
+      setSavingServerKeys(false);
+    }
   };
 
   const filteredLogs = (overview?.logs ?? []).filter((entry) =>
@@ -570,14 +640,185 @@ export function SettingsModal({
 
           {isAdmin && effectiveTab === 'developer' && (
             <>
+              <form className="settings-section server-keys-card" onSubmit={handleSaveServerKeys}>
+                <div className="settings-section-title">
+                  <Server size={16} />
+                  <h3>Live Server Keys for All Public Visitors (aviperera.com)</h3>
+                </div>
+                <p className="settings-desc">
+                  Keys saved here are stored server-side in WordPress MySQL (<code>wp_options</code>) so every visitor—logged in or not—uses your API automatically without errors or key prompts. Leave any field blank to keep its existing server value.
+                </p>
+
+                {overview?.serverKeys && (
+                  <div className="admin-health-pills">
+                    {Object.entries(overview.serverKeys).map(([key, enabled]) => (
+                      <span
+                        key={key}
+                        className={`health-pill ${enabled ? 'online' : 'offline'}`}
+                      >
+                        <span className="health-dot" />
+                        <span>
+                          {key === 'groq'
+                            ? 'Groq'
+                            : key === 'openrouter'
+                              ? 'OpenRouter'
+                              : key === 'gemini'
+                                ? 'Gemini'
+                                : key === 'googleOAuth'
+                                  ? 'Google OAuth'
+                                  : 'Admin Passcode'}
+                          : {enabled ? 'Active on Server' : 'Not set'}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="settings-grid-2">
+                  <label className="settings-field">
+                    <span>
+                      Groq Free Key (
+                      <a
+                        href="https://console.groq.com/keys"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        console.groq.com
+                      </a>
+                      )
+                    </span>
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      placeholder={
+                        overview?.serverKeys.groq ? 'Configured — paste to replace' : 'gsk_...'
+                      }
+                      value={serverGroq}
+                      onChange={(e) => setServerGroq(e.target.value)}
+                    />
+                  </label>
+
+                  <label className="settings-field">
+                    <span>
+                      OpenRouter Free Key (
+                      <a
+                        href="https://openrouter.ai/keys"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        openrouter.ai
+                      </a>
+                      )
+                    </span>
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      placeholder={
+                        overview?.serverKeys.openrouter
+                          ? 'Configured — paste to replace'
+                          : 'sk-or-v1-...'
+                      }
+                      value={serverOpenRouter}
+                      onChange={(e) => setServerOpenRouter(e.target.value)}
+                    />
+                  </label>
+                </div>
+
+                <div className="settings-grid-2">
+                  <label className="settings-field">
+                    <span>Google Gemini Key (Optional)</span>
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      placeholder={
+                        overview?.serverKeys.gemini
+                          ? 'Configured — paste to replace'
+                          : 'AIza... or AQ...'
+                      }
+                      value={serverGemini}
+                      onChange={(e) => setServerGemini(e.target.value)}
+                    />
+                  </label>
+
+                  <label className="settings-field">
+                    <span>Google OAuth Client ID (Optional)</span>
+                    <input
+                      type="text"
+                      autoComplete="off"
+                      placeholder={
+                        overview?.serverKeys.googleOAuth
+                          ? 'Configured — paste to replace'
+                          : '123456-abc.apps.googleusercontent.com'
+                      }
+                      value={serverGoogleClientId}
+                      onChange={(e) => setServerGoogleClientId(e.target.value)}
+                    />
+                  </label>
+                </div>
+
+                <label className="settings-field">
+                  <span>Admin Fallback Passcode (Optional)</span>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    placeholder={
+                      overview?.serverKeys.adminPasscode
+                        ? 'Configured — paste to replace'
+                        : 'Secret fallback passcode for workwithavip@gmail.com'
+                    }
+                    value={serverAdminPasscode}
+                    onChange={(e) => setServerAdminPasscode(e.target.value)}
+                  />
+                </label>
+
+                {serverSaveError && (
+                  <div className="inline-alert error">
+                    <AlertTriangle size={15} />
+                    <span>{serverSaveError}</span>
+                  </div>
+                )}
+
+                {serverSaveMessage && (
+                  <div className="inline-alert success">
+                    <Check size={15} />
+                    <span>{serverSaveMessage}</span>
+                  </div>
+                )}
+
+                <div className="modal-actions-row">
+                  {authConfig?.wpAdminUrl && (
+                    <a
+                      href={authConfig.wpAdminUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn-secondary-sm"
+                    >
+                      <ExternalLink size={14} />
+                      <span>WP Admin Dashboard</span>
+                    </a>
+                  )}
+                  <button
+                    type="submit"
+                    className="btn-primary-sm"
+                    disabled={savingServerKeys}
+                  >
+                    <Server size={14} />
+                    <span>
+                      {savingServerKeys
+                        ? 'Saving to Server…'
+                        : 'Save Keys to Live Website Server'}
+                    </span>
+                  </button>
+                </div>
+              </form>
+
               <section className="settings-section">
                 <div className="settings-section-title">
                   <Sparkles size={16} />
-                  <h3>Free Open-Source AI Providers (Browser Override)</h3>
+                  <h3>Admin Browser Override (This Device Only)</h3>
                 </div>
                 <p className="settings-desc">
-                  Production visitors use your server-side keys in PHP (
-                  <code>api/chat.php</code>) or Node (<code>.env.local</code>). Values below override locally in your admin browser only.
+                  Optional temporary overrides stored only in this browser’s <code>localStorage</code> for admin testing. Public visitors always use the Live Server Keys above.
                 </p>
 
                 <label className="settings-field">

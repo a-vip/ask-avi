@@ -22,6 +22,18 @@ function ask_avi_boot_wordpress(): bool {
   for ($i = 0; $i < 8; $i++) {
     $candidate = $dir . '/wp-load.php';
     if (file_exists($candidate)) {
+      if (!defined('DONOTCACHEPAGE')) {
+        define('DONOTCACHEPAGE', true);
+      }
+      if (!defined('DONOTCACHEOBJECT')) {
+        define('DONOTCACHEOBJECT', true);
+      }
+      if (!defined('DONOTCACHEDB')) {
+        define('DONOTCACHEDB', true);
+      }
+      if (!defined('LSCACHE_NO_CACHE')) {
+        define('LSCACHE_NO_CACHE', true);
+      }
       define('SHORTINIT', false);
       require_once $candidate;
       return true;
@@ -213,16 +225,15 @@ function ask_avi_resolve_request_user(): ?array {
     if ($wpUser && $wpUser->exists()) {
       $email = strtolower(trim((string) $wpUser->user_email));
       $isWpAdmin = function_exists('current_user_can') && current_user_can('manage_options');
-      $isAviAdmin = $isWpAdmin && ($email === ASK_AVI_ADMIN_EMAIL || count_users()['total_users'] > 0);
-      // Admin features require verified workwithavip@gmail.com OR explicit WP administrator matched to admin email.
-      $role = ($isWpAdmin && $email === ASK_AVI_ADMIN_EMAIL) ? 'admin' : 'user';
+      // Admin features require verified workwithavip@gmail.com OR WordPress administrator capability.
+      $role = ($isWpAdmin && ($email === ASK_AVI_ADMIN_EMAIL || current_user_can('manage_options'))) ? 'admin' : 'user';
       return [
         'sub' => 'wp_' . (string) $wpUser->ID,
         'email' => $email,
         'name' => (string) ($wpUser->display_name ?: $wpUser->user_login),
         'role' => $role,
         'provider' => 'wordpress',
-        'isAdminWpFallback' => $isAviAdmin,
+        'wpAdmin' => $isWpAdmin,
       ];
     }
   }

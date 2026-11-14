@@ -238,9 +238,9 @@ class AviLLMService {
     const openRouterKey = params.openRouterApiKey?.trim();
     const proxyUrl = resolveEffectiveProxyUrl(params.proxyUrl);
 
-    if (!groqKey && !openRouterKey && !proxyUrl) {
+  if (!proxyUrl && !groqKey && !openRouterKey) {
       throw new BackendNotConfiguredError(
-        'Connect a 100% free Groq key (console.groq.com) or OpenRouter key (openrouter.ai) in Settings — no credit card required — or deploy the free Cloudflare Workers AI proxy. You can also switch to Google Gemini above.'
+        'No live server endpoint is configured here. Open Admin API Settings to save your free Groq or OpenRouter key to the live website server.'
       );
     }
 
@@ -419,13 +419,21 @@ class AviLLMService {
         lastStatus === 503 &&
         (lastErrBody.includes('proxy_unconfigured') || lastErrBody.includes('GROQ_API_KEY'))
       ) {
+        let serverMessage = '';
+        try {
+          const parsed = JSON.parse(lastErrBody) as { message?: string };
+          serverMessage = parsed.message?.trim() || '';
+        } catch {
+          serverMessage = '';
+        }
         throw new BackendNotConfiguredError(
-          'Proxy is live — bind Cloudflare Workers AI [ai] or add a free Groq/OpenRouter key in Settings.'
+          serverMessage ||
+            'Live server API keys are not configured yet. Open Admin API Settings to save your free Groq/OpenRouter keys to the live server so all visitors can chat.'
         );
       }
       if (lastStatus === 404 && !groqKey && !openRouterKey) {
         throw new BackendNotConfiguredError(
-          'Add a 100% free Groq key (console.groq.com) or OpenRouter key (openrouter.ai) in Settings — no credit card required — or deploy the Cloudflare Workers AI proxy.'
+          'Live chat backend route was not found here. Open Admin API Settings to connect a free Groq or OpenRouter key.'
         );
       }
     }
@@ -599,12 +607,12 @@ class AviLLMService {
         (lastErrBody.includes('proxy_unconfigured') || lastErrBody.includes('GEMINI_API_KEY'))
       ) {
         throw new BackendNotConfiguredError(
-          'Proxy is live, awaiting API key configuration — paste a free Groq/OpenRouter or Gemini key in Settings.'
+          'Gemini server key is not configured yet. Open Admin API Settings to save a Gemini key to the live server (or switch to Open-Source Reasoning).'
         );
       }
       if (lastStatus === 404 && !directKey) {
         throw new BackendNotConfiguredError(
-          'No live API backend connected at this origin yet. Add a free Groq/OpenRouter or Gemini key in Settings.'
+          'No live backend API endpoint is reachable here. Open Admin API Settings to configure your API keys.'
         );
       }
       throw new Error(formatApiErrorMessage('Gemini API', lastStatus, lastErrBody, lastStatusText));

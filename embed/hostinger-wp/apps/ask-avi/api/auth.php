@@ -69,14 +69,27 @@ function ask_avi_issue_token_for_row(array $row): string {
   ]);
 }
 
+function ask_avi_is_request_admin(?array $reqUser): bool {
+  if ($reqUser) {
+    $email = strtolower((string) ($reqUser['email'] ?? ''));
+    if (($reqUser['role'] ?? '') === 'admin' && $email === ASK_AVI_ADMIN_EMAIL) {
+      return true;
+    }
+    if (!empty($reqUser['wpAdmin'])) {
+      return true;
+    }
+  }
+  return function_exists('current_user_can') && current_user_can('manage_options');
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
   $action = $_GET['action'] ?? '';
 
   if ($action === 'admin_overview') {
-    if (!$reqUser) {
+    if (!$reqUser && !ask_avi_is_request_admin($reqUser)) {
       ask_avi_send_json(401, ['ok' => false, 'error' => 'Authentication required.']);
     }
-    if (($reqUser['role'] ?? '') !== 'admin' || strtolower($reqUser['email']) !== ASK_AVI_ADMIN_EMAIL) {
+    if (!ask_avi_is_request_admin($reqUser)) {
       ask_avi_send_json(403, ['ok' => false, 'error' => 'Admin privileges required.']);
     }
 
@@ -192,6 +205,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
   $wpLogoutUrl = function_exists('wp_logout_url')
     ? html_entity_decode(wp_logout_url(home_url('/ask-avi/')), ENT_QUOTES, 'UTF-8')
     : '';
+  $wpAdminUrl = function_exists('admin_url')
+    ? html_entity_decode(admin_url('admin.php?page=ask-avi-admin'), ENT_QUOTES, 'UTF-8')
+    : '';
 
   ask_avi_send_json(200, [
     'ok' => true,
@@ -200,6 +216,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     'wpSsoEnabled' => true,
     'wpLoginUrl' => $wpLoginUrl,
     'wpLogoutUrl' => $wpLogoutUrl,
+    'wpAdminUrl' => $wpAdminUrl,
+    'serverConfigured' => !empty($settings['groq_api_key']) || !empty($settings['openrouter_api_key']),
     'hasAdminPasscode' => !empty($settings['admin_passcode']),
     'currentUser' => $currentUserPayload,
   ]);
@@ -437,6 +455,65 @@ if ($action === 'signup' || $action === 'signin') {
   ]);
   $token = ask_avi_issue_token_for_row($existing);
   ask_avi_send_json(200, ['ok' => true, 'user' => ask_avi_format_client_user($existing, $token)]);
+}
+
+if ($action === 'save_server_settings') {
+  if (!$reqUser && !ask_avi_is_request_admin($reqUser)) {
+    ask_avi_send_json(401, ['ok' => false, 'error' => 'Admin authentication required.']);
+  }
+  if (!ask_avi_is_request_admin($reqUser)) {
+    ask_avi_send_json(403, ['ok' => false, 'error' => 'Admin privileges required.']);
+  }
+  if (!function_exists('update_option')) {
+    ask_avi_send_json(500, ['ok' => false, 'error' => 'WordPress options API unavailable.']);
+  }
+
+  $current = get_option(ASK_AVI_OPTION_KEY, []);
+  if (!is_array($current)) {
+    $current = [];
+  }
+  $map = [
+    'groqApiKey' => 'groq_api_key',
+    'openRouterApiKey' => 'openrouter_api_key',
+    'geminiApiKey' => 'gemini_api_key',
+    'googleClientId' => 'google_client_id',
+    'adminPasscode' => 'admin_passcode',
+  ];
+  $clearKeys = is_array($body['clearKeys'] ?? null) ? $body['clearKeys'] : [];
+
+  foreach ($map as $camel => $optKey) {
+    if (in_array($camel, $clearKeys, true)) {
+      $current[$optKey] = '';
+      continue;
+    }
+    if (array_key_exists($camel, $body)) {
+      $val = trim((string) $body[$camel]);
+      if ($val !== '') {
+        $current[$optKey] = $val;
+      }
+    }
+  }
+
+  update_option(ASK_AVI_OPTION_KEY, $current, false);
+  ask_avi_record_log([
+    'type' => 'auth_signin',
+    'level' => 'info',
+    'user_email' => $reqUser['email'] ?? ASK_AVI_ADMIN_EMAIL,
+    'status_code' => 200,
+    'message' => 'Updated live Ask Avi server API keys via Admin UI.',
+  ]);
+
+  $fresh = ask_avi_get_settings();
+  ask_avi_send_json(200, [
+    'ok' => true,
+    'serverKeys' => [
+      'groq' => !empty($fresh['groq_api_key']),
+      'openrouter' => !empty($fresh['openrouter_api_key']),
+      'gemini' => !empty($fresh['gemini_api_key']),
+      'googleOAuth' => !empty($fresh['google_client_id']),
+      'adminPasscode' => !empty($fresh['admin_passcode']),
+    ],
+  ]);
 }
 
 if ($action === 'telemetry') {

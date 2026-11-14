@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+import { SignInModal } from '../src/components/AccountDialogs';
 import { Composer } from '../src/components/Composer';
 import { MessageBubble } from '../src/components/MessageBubble';
 import { SettingsModal } from '../src/components/SettingsModal';
@@ -241,5 +242,119 @@ describe('Minimalist Frontier UI Upgrades', () => {
     expect(adminSettings.container.textContent).toContain('Admin & Analytics');
     expect(adminSettings.container.textContent).toContain('APIs & Deployment');
     adminSettings.cleanup();
+
+    const adminDevSettings = mountTestElement(
+      <SettingsModal
+        isOpen
+        initialTab="developer"
+        settings={DEFAULT_SETTINGS}
+        userProfile={{
+          name: 'Avi Perera',
+          email: 'workwithavip@gmail.com',
+          provider: 'wordpress',
+          isAdmin: true,
+          signedInAt: 1,
+        }}
+        authConfig={{
+          ok: true,
+          googleEnabled: false,
+          googleClientId: '',
+          wpSsoEnabled: true,
+          wpAdminUrl: 'https://aviperera.com/wp-admin/admin.php?page=ask-avi-admin',
+          hasAdminPasscode: true,
+          currentUser: null,
+        }}
+        onClose={vi.fn()}
+        onUpdateSettings={vi.fn()}
+      />
+    );
+    expect(adminDevSettings.container.textContent).toContain(
+      'Live Server Keys for All Public Visitors'
+    );
+    expect(adminDevSettings.container.textContent).toContain('Save Keys to Live Website Server');
+    expect(adminDevSettings.container.textContent).toContain('WP Admin Dashboard');
+    adminDevSettings.cleanup();
+  });
+
+  it('renders polished stacked auth form inputs with password toggle in SignInModal', () => {
+    const { container, cleanup } = mountTestElement(
+      <SignInModal
+        isOpen
+        currentProfile={null}
+        proxyUrl="./api/chat"
+        authConfig={{
+          ok: true,
+          googleEnabled: false,
+          googleClientId: '',
+          wpSsoEnabled: true,
+          wpLoginUrl: 'https://aviperera.com/wp-login.php',
+          hasAdminPasscode: true,
+          currentUser: null,
+        }}
+        onClose={vi.fn()}
+        onSignIn={vi.fn()}
+        onSignOut={vi.fn()}
+      />
+    );
+
+    expect(container.querySelector('.auth-form')).toBeTruthy();
+    expect(container.querySelectorAll('.auth-field').length).toBe(2);
+    expect(container.querySelectorAll('.auth-input-wrap').length).toBe(2);
+
+    const passwordInput = container.querySelector<HTMLInputElement>(
+      'input[placeholder="Enter your password"]'
+    );
+    const toggleBtn = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Show password"]'
+    );
+    expect(passwordInput?.type).toBe('password');
+    expect(toggleBtn).toBeTruthy();
+
+    act(() => {
+      toggleBtn?.click();
+    });
+    expect(passwordInput?.type).toBe('text');
+    expect(container.querySelector('button[aria-label="Hide password"]')).toBeTruthy();
+
+    const signupTab = Array.from(container.querySelectorAll<HTMLButtonElement>('.auth-mode-tab')).find(
+      (b) => b.textContent?.includes('Create account')
+    );
+    act(() => {
+      signupTab?.click();
+    });
+
+    expect(container.querySelectorAll('.auth-field').length).toBe(3);
+    expect(container.querySelector('.auth-optin-card')).toBeTruthy();
+    expect(container.textContent).toContain('Continue with aviperera.com WordPress');
+    cleanup();
+  });
+
+  it('hides admin API setup buttons from public visitors when backend setup is incomplete', () => {
+    const setupMsg: ChatMessage = {
+      id: 'msg-setup',
+      role: 'assistant',
+      content: 'Live server API keys are not configured yet.',
+      createdAt: Date.now(),
+      needsBackendSetup: true,
+    };
+    const guestBubble = mountTestElement(
+      <MessageBubble
+        message={setupMsg}
+        isLastAssistant
+        isAdmin={false}
+        onEditUserMessage={vi.fn()}
+        onRegenerate={vi.fn()}
+        onFollowUpClick={vi.fn()}
+        onInspectSource={vi.fn()}
+        onFeedback={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+    expect(guestBubble.container.textContent).toContain(
+      'Ask Avi could not reach the response service right now.'
+    );
+    expect(guestBubble.container.textContent).not.toContain('Open Admin API Settings');
+    expect(guestBubble.container.textContent).not.toContain('Cloudflare');
+    guestBubble.cleanup();
   });
 });

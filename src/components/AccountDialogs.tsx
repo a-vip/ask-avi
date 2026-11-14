@@ -2,11 +2,15 @@ import {
   AlertCircle,
   BookOpen,
   ExternalLink,
+  Eye,
+  EyeOff,
   HelpCircle,
   Info,
   KeyRound,
+  Lock,
   Mail,
   ShieldCheck,
+  User,
   UserCheck,
   X,
 } from 'lucide-react';
@@ -49,6 +53,8 @@ export function SignInModal({
   const [password, setPassword] = useState('');
   const [adminPasscode, setAdminPasscode] = useState('');
   const [marketingOptIn, setMarketingOptIn] = useState(true);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showAdminPasscode, setShowAdminPasscode] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [googleLoadFailed, setGoogleLoadFailed] = useState(false);
@@ -64,6 +70,8 @@ export function SignInModal({
       setErrorMsg('');
       setPassword('');
       setAdminPasscode('');
+      setShowPassword(false);
+      setShowAdminPasscode(false);
       return;
     }
   }, [isOpen]);
@@ -224,15 +232,24 @@ export function SignInModal({
       aria-modal="true"
       aria-label={currentProfile ? 'Account profile' : 'Sign in to Ask Avi'}
     >
-      <div className="modal-card modal-card-sm">
+      <div className="modal-card modal-card-sm auth-modal-card">
         <div className="modal-head">
-          <h2>
-            {currentProfile
-              ? 'Account'
-              : authTab === 'signup'
-                ? 'Create your account'
-                : 'Sign in to Ask Avi'}
-          </h2>
+          <div className="auth-modal-heading">
+            <h2>
+              {currentProfile
+                ? 'Account'
+                : authTab === 'signup'
+                  ? 'Create your account'
+                  : 'Sign in to Ask Avi'}
+            </h2>
+            {!currentProfile && (
+              <p className="auth-subtitle">
+                {authTab === 'signup'
+                  ? 'Save your profile and optionally receive new essays & dispatches.'
+                  : 'Access your profile and synced preferences across sessions.'}
+              </p>
+            )}
+          </div>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
             <X size={18} />
           </button>
@@ -346,61 +363,97 @@ export function SignInModal({
                 </div>
               )}
 
-              <form onSubmit={handleSubmit} className="settings-section">
+              <form onSubmit={handleSubmit} className="auth-form">
                 {authTab === 'signup' && (
-                  <label className="settings-field">
-                    <span>Full name</span>
-                    <input
-                      type="text"
-                      placeholder="Your name"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                    />
+                  <label className="auth-field">
+                    <span className="auth-field-label">Full name</span>
+                    <div className="auth-input-wrap">
+                      <User size={15} className="auth-input-icon" />
+                      <input
+                        type="text"
+                        autoComplete="name"
+                        placeholder="Avi Perera"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                      />
+                    </div>
                   </label>
                 )}
 
-                <label className="settings-field">
-                  <span>Email address</span>
-                  <input
-                    type="email"
-                    required
-                    placeholder="you@domain.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
+                <label className="auth-field">
+                  <span className="auth-field-label">Email address</span>
+                  <div className="auth-input-wrap">
+                    <Mail size={15} className="auth-input-icon" />
+                    <input
+                      type="email"
+                      required
+                      autoComplete="email"
+                      placeholder="you@domain.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                  </div>
                 </label>
 
                 {hasBackendAuth && (
-                  <label className="settings-field">
-                    <span>Password</span>
-                    <input
-                      type="password"
-                      required
-                      minLength={6}
-                      placeholder={
-                        authTab === 'signup' ? 'Create a password (min 6 chars)' : 'Enter password'
-                      }
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                    />
+                  <label className="auth-field">
+                    <span className="auth-field-label">Password</span>
+                    <div className="auth-input-wrap">
+                      <Lock size={15} className="auth-input-icon" />
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        autoComplete={
+                          authTab === 'signup' ? 'new-password' : 'current-password'
+                        }
+                        placeholder={
+                          authTab === 'signup'
+                            ? 'Minimum 6 characters'
+                            : 'Enter your password'
+                        }
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="auth-eye-btn"
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        onClick={() => setShowPassword((prev) => !prev)}
+                      >
+                        {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
                   </label>
                 )}
 
                 {hasBackendAuth && needsAdminPasscode && (
-                  <label className="settings-field admin-passcode-field">
-                    <span>Admin verification passcode</span>
-                    <input
-                      type="password"
-                      required
-                      placeholder="Required for workwithavip@gmail.com"
-                      value={adminPasscode}
-                      onChange={(e) => setAdminPasscode(e.target.value)}
-                    />
+                  <label className="auth-field admin-passcode-field">
+                    <span className="auth-field-label">Admin verification passcode</span>
+                    <div className="auth-input-wrap">
+                      <ShieldCheck size={15} className="auth-input-icon" />
+                      <input
+                        type={showAdminPasscode ? 'text' : 'password'}
+                        required
+                        autoComplete="off"
+                        placeholder="Required for workwithavip@gmail.com"
+                        value={adminPasscode}
+                        onChange={(e) => setAdminPasscode(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="auth-eye-btn"
+                        aria-label={showAdminPasscode ? 'Hide passcode' : 'Show passcode'}
+                        onClick={() => setShowAdminPasscode((prev) => !prev)}
+                      >
+                        {showAdminPasscode ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
                   </label>
                 )}
 
                 {authTab === 'signup' && (
-                  <label className="auth-optin-label">
+                  <label className="auth-optin-card">
                     <input
                       type="checkbox"
                       checked={marketingOptIn}
@@ -417,22 +470,20 @@ export function SignInModal({
                   </div>
                 )}
 
-                <div className="modal-actions-row">
-                  <button
-                    type="submit"
-                    className="btn-primary-sm full-width-btn"
-                    disabled={submitting}
-                  >
-                    <UserCheck size={14} />
-                    <span>
-                      {submitting
-                        ? 'Please wait…'
-                        : authTab === 'signup'
-                          ? 'Create account'
-                          : 'Sign in'}
-                    </span>
-                  </button>
-                </div>
+                <button
+                  type="submit"
+                  className="btn-primary-sm auth-submit-btn"
+                  disabled={submitting}
+                >
+                  <UserCheck size={15} />
+                  <span>
+                    {submitting
+                      ? 'Please wait…'
+                      : authTab === 'signup'
+                        ? 'Create account'
+                        : 'Sign in'}
+                  </span>
+                </button>
               </form>
             </>
           )}

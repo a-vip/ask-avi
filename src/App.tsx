@@ -68,10 +68,16 @@ export default function App() {
   const [drawerSources, setDrawerSources] = useState<RetrievedSource[]>([]);
   const [drawerFocusIdx, setDrawerFocusIdx] = useState<number | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'general' | 'admin' | 'developer'>('general');
   const [userProfile, setUserProfile] = useState<UserProfile | null>(() => loadUserProfile());
   const [authConfig, setAuthConfig] = useState<AuthConfigResponse | null>(null);
   const [signInOpen, setSignInOpen] = useState(false);
   const [accountInfoMode, setAccountInfoMode] = useState<'help' | 'about' | null>(null);
+
+  const openSettingsModal = useCallback((tab: 'general' | 'admin' | 'developer' = 'general') => {
+    setSettingsTab(tab);
+    setSettingsOpen(true);
+  }, []);
 
   const isAdmin = isVerifiedAdmin(userProfile);
 
@@ -131,7 +137,7 @@ export default function App() {
       }
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === ',' || e.code === 'Comma')) {
         e.preventDefault();
-        setSettingsOpen(true);
+        openSettingsModal('general');
         return;
       }
       if (e.key === 'Escape') {
@@ -156,6 +162,25 @@ export default function App() {
   useEffect(() => {
     saveUserProfile(userProfile);
   }, [userProfile]);
+
+  const refreshAuthConfig = useCallback(async () => {
+    const cfg = await fetchAuthConfig(userProfile?.sessionToken, settings.proxyUrl);
+    if (!cfg) return;
+    setAuthConfig(cfg);
+    if (cfg.currentUser) {
+      setUserProfile((prev) => ({
+        ...cfg.currentUser!,
+        sessionToken: cfg.currentUser!.sessionToken ?? prev?.sessionToken,
+      }));
+    } else {
+      setUserProfile((prev) => {
+        if (prev && (prev.isAdmin || prev.provider === 'wordpress')) {
+          return null;
+        }
+        return prev;
+      });
+    }
+  }, [settings.proxyUrl, userProfile?.sessionToken]);
 
   useEffect(() => {
     let active = true;
@@ -642,7 +667,7 @@ export default function App() {
           setDrawerTab('archive');
           setKnowledgeOpen(true);
         }}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => openSettingsModal('general')}
         onToggleTheme={handleToggleTheme}
         onOpenHelp={() => setAccountInfoMode('help')}
         onOpenAbout={() => setAccountInfoMode('about')}
@@ -689,7 +714,7 @@ export default function App() {
               webSearchEnabled={settings.webSearchEnabled}
               onSelectEngine={handleSelectEngine}
               onToggleWebSearch={handleToggleWebSearch}
-              onOpenSettings={() => setSettingsOpen(true)}
+              onOpenSettings={() => openSettingsModal('general')}
               voiceStyle={settings.voiceStyle}
               onChangeVoiceStyle={(voiceStyle: VoiceStyle) =>
                 setSettings((prev) => ({ ...prev, voiceStyle }))
@@ -711,6 +736,7 @@ export default function App() {
                   message={msg}
                   isLastAssistant={msg.id === lastAssistantId}
                   isAdmin={isAdmin}
+                  wpAdminUrl={authConfig?.wpAdminUrl}
                   onEditUserMessage={handleEditUserMessage}
                   onRegenerate={handleRegenerate}
                   onFollowUpClick={(prompt) => handleSubmitPrompt(prompt)}
@@ -720,7 +746,7 @@ export default function App() {
                       msgs.map((m) => (m.id === msgId ? { ...m, feedback: vote } : m))
                     )
                   }
-                  onOpenSettings={() => setSettingsOpen(true)}
+                  onOpenSettings={() => openSettingsModal(isAdmin ? 'developer' : 'general')}
                 />
               ))}
               <div ref={messagesEndRef} className="scroll-anchor" />
@@ -740,7 +766,7 @@ export default function App() {
               webSearchEnabled={settings.webSearchEnabled}
               onSelectEngine={handleSelectEngine}
               onToggleWebSearch={handleToggleWebSearch}
-              onOpenSettings={() => setSettingsOpen(true)}
+              onOpenSettings={() => openSettingsModal('general')}
               voiceStyle={settings.voiceStyle}
               onChangeVoiceStyle={(voiceStyle: VoiceStyle) =>
                 setSettings((prev) => ({ ...prev, voiceStyle }))
@@ -770,15 +796,18 @@ export default function App() {
 
       <SettingsModal
         isOpen={settingsOpen}
+        initialTab={settingsTab}
         settings={settings}
         theme={settings.theme}
         userProfile={userProfile}
+        authConfig={authConfig}
         onClose={() => setSettingsOpen(false)}
         onUpdateSettings={setSettings}
         onToggleTheme={handleToggleTheme}
         onOpenSignIn={() => setSignInOpen(true)}
         onClearAllThreads={handleClearAllThreads}
         onExportAllThreads={handleExportAllThreads}
+        onRefreshAuthConfig={() => void refreshAuthConfig()}
       />
 
       <SignInModal
@@ -794,7 +823,7 @@ export default function App() {
       <AccountInfoModal
         mode={accountInfoMode}
         onClose={() => setAccountInfoMode(null)}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => openSettingsModal('general')}
         onOpenDossiers={() => {
           setDrawerTab('archive');
           setKnowledgeOpen(true);

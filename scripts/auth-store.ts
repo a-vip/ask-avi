@@ -415,6 +415,9 @@ export async function handleAuthRequest(
       googleEnabled: Boolean(process.env.GOOGLE_CLIENT_ID?.trim()),
       googleClientId: process.env.GOOGLE_CLIENT_ID?.trim() || '',
       wpSsoEnabled: false,
+      serverConfigured: Boolean(
+        process.env.GROQ_API_KEY?.trim() || process.env.OPENROUTER_API_KEY?.trim()
+      ),
       hasAdminPasscode: Boolean(process.env.ASK_AVI_ADMIN_PASSCODE?.trim()),
       currentUser: matchedUser ? toClientUser(matchedUser) : null,
     });
@@ -652,6 +655,98 @@ export async function handleAuthRequest(
     writeDb(db);
     const sessionToken = issueUserSession(existing);
     sendJson(res, 200, { ok: true, user: toClientUser(existing, sessionToken) });
+    return;
+  }
+
+  if (action === 'save_server_settings') {
+    if (!bearer) {
+      sendJson(res, 401, { ok: false, error: 'Admin authentication required.' });
+      return;
+    }
+    if (bearer.role !== 'admin' || bearer.email.toLowerCase() !== ADMIN_EMAIL) {
+      sendJson(res, 403, { ok: false, error: 'Admin privileges required.' });
+      return;
+    }
+
+    const envMap: Array<[string, string]> = [
+      ['groqApiKey', 'GROQ_API_KEY'],
+      ['openRouterApiKey', 'OPENROUTER_API_KEY'],
+      ['geminiApiKey', 'GEMINI_API_KEY'],
+      ['googleClientId', 'GOOGLE_CLIENT_ID'],
+      ['adminPasscode', 'ASK_AVI_ADMIN_PASSCODE'],
+    ];
+    const clearKeys = Array.isArray(body.clearKeys)
+      ? body.clearKeys.map((k) => String(k))
+      : [];
+    const updates = new Map<string, string>();
+
+    for (const [camel, envKey] of envMap) {
+      if (clearKeys.includes(camel)) {
+        delete process.env[envKey];
+        updates.set(envKey, '');
+        continue;
+      }
+      if (Object.prototype.hasOwnProperty.call(body, camel)) {
+        const val = String(body[camel] ?? '').trim();
+        if (val) {
+          process.env[envKey] = val;
+          updates.set(envKey, val);
+        }
+      }
+    }
+
+    const envPath = join(process.cwd(), '.env.local');
+    const existingLines = existsSync(envPath)
+      ? readFileSync(envPath, 'utf8').split(/\r?\n/)
+      : [];
+    const handled = new Set<string>();
+    const nextLines: string[] = [];
+
+    for (const line of existingLines) {
+      const trimmed = line.trim();
+      const eq = trimmed.indexOf('=');
+      if (trimmed && !trimmed.startsWith('#') && eq > 0) {
+        const k = trimmed.slice(0, eq).trim();
+        if (updates.has(k)) {
+          handled.add(k);
+          const v = updates.get(k) ?? '';
+          if (v !== '') {
+            nextLines.push(`${k}=${v}`);
+          }
+          continue;
+        }
+      }
+      if (line.trim() !== '' || nextLines.length > 0) {
+        nextLines.push(line);
+      }
+    }
+    for (const [k, v] of updates.entries()) {
+      if (!handled.has(k) && v !== '') {
+        nextLines.push(`${k}=${v}`);
+      }
+    }
+    writeFileSync(envPath, `${nextLines.join('\n').trim()}\n`, 'utf8');
+
+    const db = readDb();
+    appendLog(db, {
+      type: 'auth_signin',
+      level: 'info',
+      userEmail: bearer.email,
+      statusCode: 200,
+      message: 'Updated live Ask Avi server API keys via Admin UI.',
+    });
+    writeDb(db);
+
+    sendJson(res, 200, {
+      ok: true,
+      serverKeys: {
+        groq: Boolean(process.env.GROQ_API_KEY?.trim()),
+        openrouter: Boolean(process.env.OPENROUTER_API_KEY?.trim()),
+        gemini: Boolean(process.env.GEMINI_API_KEY?.trim()),
+        googleOAuth: Boolean(process.env.GOOGLE_CLIENT_ID?.trim()),
+        adminPasscode: Boolean(process.env.ASK_AVI_ADMIN_PASSCODE?.trim()),
+      },
+    });
     return;
   }
 

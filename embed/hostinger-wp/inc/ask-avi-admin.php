@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
  * provision database tables, and purge LiteSpeed caches on new theme version rollout.
  */
 add_action('init', static function () {
-  if (get_option('ask_avi_deployment_ver') === '20261114d') {
+  if (get_option('ask_avi_deployment_ver') === '20261114e') {
     return;
   }
 
@@ -45,7 +45,7 @@ add_action('init', static function () {
     }
   }
 
-  update_option('ask_avi_deployment_ver', '20261114d', false);
+  update_option('ask_avi_deployment_ver', '20261114e', false);
   flush_rewrite_rules(false);
   do_action('litespeed_purge_all');
   if (class_exists('\LiteSpeed\Purge')) {
@@ -169,7 +169,14 @@ function ask_avi_render_admin_page(): void {
     ask_avi_ensure_tables();
   }
 
+  global $wpdb;
+  $users_table = $wpdb->prefix . 'ask_avi_users';
+  $logs_table = $wpdb->prefix . 'ask_avi_logs';
+  $users_exists = ($wpdb->get_var("SHOW TABLES LIKE '{$users_table}'") === $users_table);
+
   $saved = false;
+  $adminPwSaved = false;
+  $adminPwError = '';
   if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ask_avi_save_settings'])) {
     check_admin_referer('ask_avi_save_settings');
     $next = [
@@ -177,17 +184,62 @@ function ask_avi_render_admin_page(): void {
       'openrouter_api_key' => sanitize_text_field(wp_unslash($_POST['openrouter_api_key'] ?? '')),
       'gemini_api_key' => sanitize_text_field(wp_unslash($_POST['gemini_api_key'] ?? '')),
       'google_client_id' => sanitize_text_field(wp_unslash($_POST['google_client_id'] ?? '')),
-      'admin_passcode' => sanitize_text_field(wp_unslash($_POST['admin_passcode'] ?? '')),
+      'admin_passcode' => '',
     ];
     update_option('ask_avi_settings', $next, false);
+
+    $rawAdminPw = trim((string) wp_unslash($_POST['admin_ask_avi_password'] ?? ''));
+    if ($rawAdminPw !== '') {
+      if (strlen($rawAdminPw) < 6) {
+        $adminPwError = 'Admin password must be at least 6 characters (API keys were still saved).';
+      } elseif (!$users_exists) {
+        $adminPwError = 'Ask Avi user table is not initialized yet; reload and try again.';
+      } else {
+        $adminEmail = defined('ASK_AVI_ADMIN_EMAIL') ? ASK_AVI_ADMIN_EMAIL : 'workwithavip@gmail.com';
+        $pwHash = password_hash($rawAdminPw, PASSWORD_DEFAULT);
+        $existingAdmin = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$users_table} WHERE email = %s", $adminEmail), ARRAY_A);
+        $nowMs = (int) round(microtime(true) * 1000);
+        if ($existingAdmin) {
+          $wpdb->update(
+            $users_table,
+            [
+              'role' => 'admin',
+              'password_hash' => $pwHash,
+              'last_seen_at' => $nowMs,
+            ],
+            ['id' => $existingAdmin['id']]
+          );
+        } else {
+          $wpdb->insert(
+            $users_table,
+            [
+              'id' => 'u_' . bin2hex(random_bytes(6)),
+              'email' => $adminEmail,
+              'name' => 'Avi Perera',
+              'picture' => null,
+              'provider' => 'email',
+              'role' => 'admin',
+              'password_hash' => $pwHash,
+              'marketing_opt_in' => 0,
+              'created_at' => $nowMs,
+              'last_seen_at' => $nowMs,
+              'login_count' => 0,
+              'chat_count' => 0,
+              'error_count' => 0,
+            ]
+          );
+        }
+        $adminPwSaved = true;
+      }
+    }
     $saved = true;
   }
 
   $opts = get_option('ask_avi_settings', []);
-  global $wpdb;
-  $users_table = $wpdb->prefix . 'ask_avi_users';
-  $logs_table = $wpdb->prefix . 'ask_avi_logs';
-  $users_exists = ($wpdb->get_var("SHOW TABLES LIKE '{$users_table}'") === $users_table);
+  $adminEmail = defined('ASK_AVI_ADMIN_EMAIL') ? ASK_AVI_ADMIN_EMAIL : 'workwithavip@gmail.com';
+  $hasAdminPassword = $users_exists
+    ? (bool) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$users_table} WHERE email = %s AND password_hash IS NOT NULL AND password_hash != ''", $adminEmail))
+    : false;
   $users = $users_exists
     ? ($wpdb->get_results("SELECT * FROM {$users_table} ORDER BY last_seen_at DESC LIMIT 500", ARRAY_A) ?: [])
     : [];
@@ -239,10 +291,14 @@ function ask_avi_render_admin_page(): void {
       </div>
     </div>
 
-    <?php if ($saved): ?>
+    <?php if ($adminPwError !== ''): ?>
+      <div class="notice notice-error is-dismissible"><p><?php echo esc_html($adminPwError); ?></p></div>
+    <?php elseif ($adminPwSaved): ?>
+      <div class="notice notice-success is-dismissible"><p>Ask Avi backend keys and admin email password saved securely.</p></div>
+    <?php elseif ($saved): ?>
       <div class="notice notice-success is-dismissible"><p>Ask Avi backend keys saved securely in WordPress options.</p></div>
     <?php elseif (isset($_GET['deleted']) && $_GET['deleted'] === '1'): ?>
-      <div class="notice notice-success is-dismissible"><p>User record removed from Ask Avi directory.</p></div></div>
+      <div class="notice notice-success is-dismissible"><p>User record removed from Ask Avi directory.</p></div>
     <?php endif; ?>
 
     <form method="post" style="background:#fff;padding:18px;border:1px solid #ccd0d4;border-radius:6px;margin-bottom:24px;">
@@ -269,10 +325,13 @@ function ask_avi_render_admin_page(): void {
           </td>
         </tr>
         <tr>
-          <th scope="row"><label for="admin_passcode">Admin Fallback Passcode</label></th>
+          <th scope="row"><label for="admin_ask_avi_password">Admin Email Password</label></th>
           <td>
-            <input name="admin_passcode" id="admin_passcode" type="password" class="regular-text" value="<?php echo esc_attr($opts['admin_passcode'] ?? ''); ?>" />
-            <p class="description">Required only when logging into the frontend UI via email with <code>workwithavip@gmail.com</code> without Google/WP SSO.</p>
+            <input name="admin_ask_avi_password" id="admin_ask_avi_password" type="password" autocomplete="new-password" class="regular-text" placeholder="Leave blank to keep current password" value="" />
+            <p class="description">
+              Status: <strong><?php echo $hasAdminPassword ? 'Password configured' : 'Not set yet'; ?></strong> for <code><?php echo esc_html($adminEmail); ?></code>.
+              Set this (min 6 characters) if you want to sign into Ask Avi via Email &amp; Password without showing any passcode prompt on the public login modal. Google Sign-In and logged-in WordPress Admin sessions also authenticate automatically.
+            </p>
           </td>
         </tr>
       </table>

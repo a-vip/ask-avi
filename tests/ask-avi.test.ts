@@ -26,7 +26,7 @@ import {
   MAX_CONTEXT_ITEMS,
   MAX_TOTAL_CONTEXT_CHARS,
 } from '../src/utils/contextExtractor';
-import { renderMarkdownToSafeHtml } from '../src/utils/markdown';
+import { renderMarkdownToSafeHtml, resolveSourceUrl } from '../src/utils/markdown';
 import { splitThinkingAndAnswer } from '../src/utils/thinking';
 import {
   DEFAULT_SETTINGS,
@@ -211,15 +211,38 @@ describe('Free Open-Source Default, Multi-Provider Config & SSE Parsers', () => 
 });
 
 describe('Safe Markdown, Citation Pills & Custom Reasoning Tags', () => {
-  it('converts valid inline [n] citations into clickable buttons and skips out-of-range numbers', () => {
-    const html = renderMarkdownToSafeHtml(
-      'Accountability requires verification [1] and intervention capacity [2], not [99].',
-      2
+  it('resolves safe source URLs or DOI fallbacks and rejects unsafe protocols', () => {
+    expect(resolveSourceUrl('https://aviperera.com/global-shell-game/')).toBe(
+      'https://aviperera.com/global-shell-game/'
     );
-    expect(html).toContain('class="cite-pill" data-cite-idx="1"');
-    expect(html).toContain('class="cite-pill" data-cite-idx="2"');
-    expect(html).not.toContain('data-cite-idx="99"');
-    expect(html).toContain('[99]');
+    expect(resolveSourceUrl(undefined, '10.1111/test-doi')).toBe('https://doi.org/10.1111/test-doi');
+    expect(resolveSourceUrl('javascript:alert(1)')).toBe('');
+  });
+
+  it('converts valid inline [n] citations into direct hyperlinks when URLs exist and falls back cleanly otherwise', () => {
+    const linkedHtml = renderMarkdownToSafeHtml(
+      'Accountability requires verification [1] and intervention capacity [2], plus [existing link](https://example.com/[1]), not [99].',
+      [
+        { title: 'The Global Shell Game', url: 'https://aviperera.com/the-global-shell-game/' },
+        { title: 'Autonomous Weapons Study', doi: '10.1000/xyz123' },
+      ]
+    );
+    expect(linkedHtml).toContain(
+      'href="https://aviperera.com/the-global-shell-game/" target="_blank" rel="noopener noreferrer" class="cite-pill" data-cite-idx="1"'
+    );
+    expect(linkedHtml).toContain(
+      'href="https://doi.org/10.1000/xyz123" target="_blank" rel="noopener noreferrer" class="cite-pill" data-cite-idx="2"'
+    );
+    expect(linkedHtml).not.toContain('data-cite-idx="99"');
+    expect(linkedHtml).toContain('[99]');
+    expect(linkedHtml).toContain('href="https://example.com/[1]"');
+
+    const numericHtml = renderMarkdownToSafeHtml(
+      'Fallback citation [1] and invalid [9].',
+      1
+    );
+    expect(numericHtml).toContain('<button type="button" class="cite-pill" data-cite-idx="1"');
+    expect(numericHtml).not.toContain('data-cite-idx="9"');
   });
 
   it('sanitizes dangerous XSS payloads', () => {

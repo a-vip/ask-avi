@@ -273,6 +273,7 @@ describe('Minimalist Frontier UI Upgrades', () => {
     );
     expect(adminDevSettings.container.textContent).toContain('Save Keys to Live Website Server');
     expect(adminDevSettings.container.textContent).toContain('WP Admin Dashboard');
+    expect(adminDevSettings.container.textContent).not.toContain('Admin Fallback Passcode');
     adminDevSettings.cleanup();
   });
 
@@ -298,8 +299,25 @@ describe('Minimalist Frontier UI Upgrades', () => {
     );
 
     expect(container.querySelector('.auth-form')).toBeTruthy();
+    expect(container.querySelector('.auth-subtitle')?.textContent).toBe(
+      'Unlock frontier models, deeper context, and saved conversations.'
+    );
     expect(container.querySelectorAll('.auth-field').length).toBe(2);
     expect(container.querySelectorAll('.auth-input-wrap').length).toBe(2);
+    expect(container.querySelector('.admin-passcode-field')).toBeNull();
+    expect(container.textContent).not.toContain('Admin verification passcode');
+
+    const emailInput = container.querySelector<HTMLInputElement>('input[type="email"]');
+    expect(emailInput).toBeTruthy();
+    const setInputValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    act(() => {
+      if (emailInput && setInputValue) {
+        setInputValue.call(emailInput, 'workwithavip@gmail.com');
+        emailInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+    expect(container.querySelector('.admin-passcode-field')).toBeNull();
+    expect(container.textContent).not.toContain('Admin verification passcode');
 
     const passwordInput = container.querySelector<HTMLInputElement>(
       'input[placeholder="Enter your password"]'
@@ -324,6 +342,8 @@ describe('Minimalist Frontier UI Upgrades', () => {
     });
 
     expect(container.querySelectorAll('.auth-field').length).toBe(3);
+    expect(container.querySelector('.admin-passcode-field')).toBeNull();
+    expect(container.textContent).not.toContain('Admin verification passcode');
     expect(container.querySelector('.auth-optin-card')).toBeTruthy();
     expect(container.querySelector('.auth-perks-strip')).toBeTruthy();
     expect(container.textContent).not.toContain('Continue with aviperera.com WordPress');
@@ -420,7 +440,7 @@ describe('Minimalist Frontier UI Upgrades', () => {
     });
     expect(onRequireSignIn).toHaveBeenCalledWith(
       undefined,
-      expect.stringContaining('4 attachments')
+      'Unlock frontier models, deeper context, and saved conversations.'
     );
 
     const modelBtn = guestComposer.container.querySelector<HTMLButtonElement>('.composer-model-btn');
@@ -539,5 +559,86 @@ describe('Minimalist Frontier UI Upgrades', () => {
       '2.5× larger context'
     );
     noticeModal.cleanup();
+  });
+
+  it('hyperlinks inline citations and archive source chips directly to the referenced URL/DOI', () => {
+    const onInspectSource = vi.fn();
+    const citedMsg: ChatMessage = {
+      id: 'm-cite',
+      role: 'assistant',
+      content: 'This draws directly on The Global Shell Game [1] and a DOI study [2].',
+      createdAt: Date.now(),
+      sources: [
+        {
+          index: 1,
+          score: 12,
+          matchedTerms: ['shell', 'game'],
+          snippet: 'Structural accountability.',
+          entry: {
+            id: 'src-1',
+            title: 'The Global Shell Game',
+            category: 'Essay',
+            date: '2025',
+            url: 'https://aviperera.com/the-global-shell-game/',
+            doi: '',
+            keywords: [],
+            summary: '',
+            chunks: [],
+          },
+        },
+        {
+          index: 2,
+          score: 10,
+          matchedTerms: ['control'],
+          snippet: 'Meaningful human control.',
+          entry: {
+            id: 'src-2',
+            title: 'Meaningful Human Control Paper',
+            category: 'Research',
+            date: '2024',
+            url: '',
+            doi: '10.1000/mhc-paper',
+            keywords: [],
+            summary: '',
+            chunks: [],
+          },
+        },
+      ],
+    };
+
+    const { container, cleanup } = mountTestElement(
+      <MessageBubble
+        message={citedMsg}
+        isLastAssistant
+        onEditUserMessage={vi.fn()}
+        onRegenerate={vi.fn()}
+        onFollowUpClick={vi.fn()}
+        onInspectSource={onInspectSource}
+        onFeedback={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    const inlineLinks = Array.from(container.querySelectorAll<HTMLAnchorElement>('a.cite-pill'));
+    expect(inlineLinks.length).toBe(2);
+    expect(inlineLinks[0]?.getAttribute('href')).toBe('https://aviperera.com/the-global-shell-game/');
+    expect(inlineLinks[0]?.getAttribute('target')).toBe('_blank');
+    expect(inlineLinks[1]?.getAttribute('href')).toBe('https://doi.org/10.1000/mhc-paper');
+
+    const sourceStripLinks = Array.from(
+      container.querySelectorAll<HTMLAnchorElement>('.inline-sources-strip a.source-chip-btn')
+    );
+    expect(sourceStripLinks.length).toBe(2);
+    expect(sourceStripLinks[0]?.getAttribute('href')).toBe(
+      'https://aviperera.com/the-global-shell-game/'
+    );
+    expect(sourceStripLinks[0]?.getAttribute('target')).toBe('_blank');
+    expect(sourceStripLinks[1]?.getAttribute('href')).toBe('https://doi.org/10.1000/mhc-paper');
+
+    act(() => {
+      inlineLinks[0]?.click();
+    });
+    expect(onInspectSource).not.toHaveBeenCalled();
+    cleanup();
   });
 });

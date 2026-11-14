@@ -90,7 +90,7 @@ async function handleApiRequest(
         res.end(
           JSON.stringify({
             error: 'auth_required',
-            message: 'Sign in or create a free account to unlock frontier models and larger context limits.',
+            message: 'Unlock frontier models, deeper context, and saved conversations.',
           })
         );
         return;

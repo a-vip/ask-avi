@@ -625,7 +625,7 @@ class AviLLMService {
     if (!response || !response.ok || !response.body) {
       if (lastStatus === 401 || lastErrBody.includes('auth_required')) {
         throw new AuthRequiredError(
-          'Sign in or create a free account to unlock frontier models and larger context limits.'
+          'Unlock frontier models, deeper context, and saved conversations.'
         );
       }
       if (

@@ -19,7 +19,6 @@ import { useEffect, useRef, useState } from 'react';
 import { VERIFIED_LINKS } from '../data/persona';
 import type { UserProfile } from '../types/chat';
 import {
-  ADMIN_EMAIL,
   isVerifiedAdmin,
   loadGoogleIdentityScript,
   resolveEffectiveAuthUrl,
@@ -54,10 +53,8 @@ export function SignInModal({
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [adminPasscode, setAdminPasscode] = useState('');
   const [marketingOptIn, setMarketingOptIn] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
-  const [showAdminPasscode, setShowAdminPasscode] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [googleLoadFailed, setGoogleLoadFailed] = useState(false);
@@ -65,16 +62,13 @@ export function SignInModal({
   const googleBtnRef = useRef<HTMLDivElement>(null);
 
   const hasBackendAuth = Boolean(resolveEffectiveAuthUrl(proxyUrl));
-  const needsAdminPasscode = email.trim().toLowerCase() === ADMIN_EMAIL;
   const googleClientId = authConfig?.googleClientId?.trim() || '';
 
   useEffect(() => {
     if (!isOpen) {
       setErrorMsg('');
       setPassword('');
-      setAdminPasscode('');
       setShowPassword(false);
-      setShowAdminPasscode(false);
       return;
     }
   }, [isOpen]);
@@ -172,12 +166,6 @@ export function SignInModal({
     }
 
     if (!hasBackendAuth) {
-      if (cleanEmail === ADMIN_EMAIL) {
-        setErrorMsg(
-          'Admin verification requires the Ask Avi backend on aviperera.com/ask-avi or local server.'
-        );
-        return;
-      }
       onSignIn({
         name: cleanName || cleanEmail.split('@')[0],
         email: cleanEmail,
@@ -205,7 +193,6 @@ export function SignInModal({
                 email: cleanEmail,
                 password,
                 marketingOptIn,
-                ...(needsAdminPasscode ? { adminPasscode } : {}),
               },
               proxyUrl
             )
@@ -213,7 +200,6 @@ export function SignInModal({
               {
                 email: cleanEmail,
                 password,
-                ...(needsAdminPasscode ? { adminPasscode } : {}),
               },
               proxyUrl
             );
@@ -247,11 +233,7 @@ export function SignInModal({
             </h2>
             {!currentProfile && (
               <p className="auth-subtitle">
-                {pendingNotice
-                  ? pendingNotice
-                  : authTab === 'signup'
-                    ? 'Unlock Gemini frontier models, 2.5× larger context limits, and synced chats.'
-                    : 'Access Gemini frontier models, larger context limits, and synced history.'}
+                {pendingNotice || 'Unlock frontier models, deeper context, and saved conversations.'}
               </p>
             )}
           </div>
@@ -435,31 +417,6 @@ export function SignInModal({
                         onClick={() => setShowPassword((prev) => !prev)}
                       >
                         {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
-                      </button>
-                    </div>
-                  </label>
-                )}
-
-                {hasBackendAuth && needsAdminPasscode && (
-                  <label className="auth-field admin-passcode-field">
-                    <span className="auth-field-label">Admin verification passcode</span>
-                    <div className="auth-input-wrap">
-                      <ShieldCheck size={15} className="auth-input-icon" />
-                      <input
-                        type={showAdminPasscode ? 'text' : 'password'}
-                        required
-                        autoComplete="off"
-                        placeholder="Required for workwithavip@gmail.com"
-                        value={adminPasscode}
-                        onChange={(e) => setAdminPasscode(e.target.value)}
-                      />
-                      <button
-                        type="button"
-                        className="auth-eye-btn"
-                        aria-label={showAdminPasscode ? 'Hide passcode' : 'Show passcode'}
-                        onClick={() => setShowAdminPasscode((prev) => !prev)}
-                      >
-                        {showAdminPasscode ? <EyeOff size={15} /> : <Eye size={15} />}
                       </button>
                     </div>
                   </label>

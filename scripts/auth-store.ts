@@ -527,26 +527,30 @@ export async function handleAuthRequest(
     const db = readDb();
     const now = Date.now();
     const isAdminTarget = email === ADMIN_EMAIL;
+    const configuredAdminPw = (process.env.ASK_AVI_ADMIN_PASSWORD || '').trim();
+    const hasVerifiedAdminSecret =
+      Boolean(configuredAdminPw && password === configuredAdminPw) ||
+      Boolean(adminPasscode && verifyAdminPasscode(adminPasscode).ok);
 
-    if (isAdminTarget) {
-      const check = verifyAdminPasscode(adminPasscode);
-      if (!check.ok) {
+    let existing = db.users.find((u) => u.email === email);
+
+    if (action === 'signup') {
+      if (isAdminTarget && !hasVerifiedAdminSecret) {
         appendLog(db, {
           type: 'auth_denied',
           level: 'warn',
           userEmail: email,
           statusCode: 403,
-          message: `Denied unverified admin ${action} attempt.`,
+          message: 'Denied unverified admin signup attempt.',
         });
         writeDb(db);
-        sendJson(res, 403, { ok: false, error: check.reason });
+        sendJson(res, 403, {
+          ok: false,
+          error:
+            'Admin account creation via the public form is disabled. Set an admin password in WP Admin or sign in with Google.',
+        });
         return;
       }
-    }
-
-    let existing = db.users.find((u) => u.email === email);
-
-    if (action === 'signup') {
       if (existing) {
         sendJson(res, 409, {
           ok: false,
@@ -585,7 +589,22 @@ export async function handleAuthRequest(
     // action === 'signin'
     if (!existing) {
       if (isAdminTarget) {
-        // Bootstrap verified admin if passcode passed on first local sign-in.
+        if (!hasVerifiedAdminSecret) {
+          appendLog(db, {
+            type: 'auth_denied',
+            level: 'warn',
+            userEmail: email,
+            statusCode: 403,
+            message: 'Denied unverified admin signin attempt (no admin account initialized).',
+          });
+          writeDb(db);
+          sendJson(res, 403, {
+            ok: false,
+            error:
+              'Admin email password is not set yet. Sign in with Google, WP Admin, or configure your password in WP Admin -> Ask Avi.',
+          });
+          return;
+        }
         existing = {
           id: `u_${randomBytes(6).toString('hex')}`,
           email,
@@ -633,10 +652,35 @@ export async function handleAuthRequest(
         sendJson(res, 401, { ok: false, error: 'Incorrect email or password.' });
         return;
       }
-    } else if (existing.provider === 'google' && !isAdminTarget) {
+    } else if (isAdminTarget) {
+      if (hasVerifiedAdminSecret) {
+        existing.passwordHash = hashPassword(password);
+      } else {
+        appendLog(db, {
+          type: 'auth_denied',
+          level: 'warn',
+          userEmail: email,
+          statusCode: 403,
+          message: 'Denied admin email sign-in for account without email password.',
+        });
+        writeDb(db);
+        sendJson(res, 403, {
+          ok: false,
+          error:
+            'This admin account does not have an email password set yet. Sign in with Google / WP Admin or set one in WP Admin -> Ask Avi.',
+        });
+        return;
+      }
+    } else if (existing.provider === 'google') {
       sendJson(res, 400, {
         ok: false,
         error: 'This account uses Google Sign-In. Please continue with Google.',
+      });
+      return;
+    } else {
+      sendJson(res, 401, {
+        ok: false,
+        error: 'Incorrect email or password.',
       });
       return;
     }

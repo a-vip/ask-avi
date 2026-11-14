@@ -81,7 +81,6 @@ export function SettingsModal({
   const [serverOpenRouter, setServerOpenRouter] = useState('');
   const [serverGemini, setServerGemini] = useState('');
   const [serverGoogleClientId, setServerGoogleClientId] = useState('');
-  const [serverAdminPasscode, setServerAdminPasscode] = useState('');
   const [savingServerKeys, setSavingServerKeys] = useState(false);
   const [serverSaveMessage, setServerSaveMessage] = useState('');
   const [serverSaveError, setServerSaveError] = useState('');
@@ -171,7 +170,6 @@ export function SettingsModal({
       ...(serverOpenRouter.trim() ? { openRouterApiKey: serverOpenRouter.trim() } : {}),
       ...(serverGemini.trim() ? { geminiApiKey: serverGemini.trim() } : {}),
       ...(serverGoogleClientId.trim() ? { googleClientId: serverGoogleClientId.trim() } : {}),
-      ...(serverAdminPasscode.trim() ? { adminPasscode: serverAdminPasscode.trim() } : {}),
     };
 
     if (Object.keys(payload).length === 0) {
@@ -191,7 +189,6 @@ export function SettingsModal({
       setServerOpenRouter('');
       setServerGemini('');
       setServerGoogleClientId('');
-      setServerAdminPasscode('');
       setServerSaveMessage(
         'Saved to the live server! Anyone visiting aviperera.com/ask-avi/ can now chat without logging in or entering keys.'
       );
@@ -755,21 +752,6 @@ export function SettingsModal({
                     />
                   </label>
                 </div>
-
-                <label className="settings-field">
-                  <span>Admin Fallback Passcode (Optional)</span>
-                  <input
-                    type="password"
-                    autoComplete="off"
-                    placeholder={
-                      overview?.serverKeys.adminPasscode
-                        ? 'Configured — paste to replace'
-                        : 'Secret fallback passcode for workwithavip@gmail.com'
-                    }
-                    value={serverAdminPasscode}
-                    onChange={(e) => setServerAdminPasscode(e.target.value)}
-                  />
-                </label>
 
                 {serverSaveError && (
                   <div className="inline-alert error">

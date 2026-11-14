@@ -393,7 +393,7 @@ export function Composer({
                           setAttachOpen(false);
                           onRequireSignIn?.(
                             undefined,
-                            'Create a free account for 4 attachments (~2.5k tok), Gemini frontier models, and synced chats.'
+                            'Unlock frontier models, deeper context, and saved conversations.'
                           );
                         }}
                       >

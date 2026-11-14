@@ -22,7 +22,11 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage, RetrievedSource } from '../types/chat';
-import { renderMarkdownToSafeHtml } from '../utils/markdown';
+import {
+  renderMarkdownToSafeHtml,
+  resolveSourceUrl,
+  type CitationTarget,
+} from '../utils/markdown';
 import { AviAvatar } from './AviAvatar';
 
 interface MessageBubbleProps {
@@ -62,12 +66,24 @@ export function MessageBubble({
   const [liveSec, setLiveSec] = useState<number>(0);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  const sourcesCount = message.sources?.length ?? 0;
+  const citationTargets = useMemo<CitationTarget[]>(() => {
+    const archive = (message.sources ?? []).map((src) => ({
+      index: src.index,
+      url: resolveSourceUrl(src.entry.url, src.entry.doi),
+      title: src.entry.title,
+    }));
+    if (archive.length > 0) return archive;
+    return (message.webSources ?? []).map((ws, i) => ({
+      index: ws.index || i + 1,
+      url: resolveSourceUrl(ws.url),
+      title: ws.title,
+    }));
+  }, [message.sources, message.webSources]);
 
   const renderedAnswerHtml = useMemo(() => {
     if (message.role !== 'assistant' || !message.content) return '';
-    return renderMarkdownToSafeHtml(message.content, sourcesCount);
-  }, [message.role, message.content, sourcesCount]);
+    return renderMarkdownToSafeHtml(message.content, citationTargets);
+  }, [message.role, message.content, citationTargets]);
 
   const renderedThoughtHtml = useMemo(() => {
     if (message.role !== 'assistant' || !message.thoughts) return '';
@@ -115,7 +131,7 @@ export function MessageBubble({
       const target = ev.target as HTMLElement | null;
       if (!target) return;
 
-      const citeBtn = target.closest<HTMLElement>('[data-cite-idx]');
+      const citeBtn = target.closest<HTMLButtonElement>('button[data-cite-idx]');
       if (citeBtn && message.sources) {
         const idx = Number(citeBtn.dataset.citeIdx);
         onInspectSource(message.sources, idx);
@@ -456,18 +472,36 @@ export function MessageBubble({
                   </a>
                 ))}
 
-                {message.sources?.map((src) => (
-                  <button
-                    key={src.entry.id}
-                    type="button"
-                    className="source-chip-btn"
-                    onClick={() => onInspectSource(message.sources!, src.index)}
-                    title={src.entry.title}
-                  >
-                    <span className="source-chip-num">{src.index}</span>
-                    <span className="source-chip-title">{src.entry.title}</span>
-                  </button>
-                ))}
+                {message.sources?.map((src) => {
+                  const href = resolveSourceUrl(src.entry.url, src.entry.doi);
+                  if (href) {
+                    return (
+                      <a
+                        key={src.entry.id}
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="source-chip-btn"
+                        title={`${src.entry.title} — ${href}`}
+                      >
+                        <span className="source-chip-num">{src.index}</span>
+                        <span className="source-chip-title">{src.entry.title}</span>
+                      </a>
+                    );
+                  }
+                  return (
+                    <button
+                      key={src.entry.id}
+                      type="button"
+                      className="source-chip-btn"
+                      onClick={() => onInspectSource(message.sources!, src.index)}
+                      title={src.entry.title}
+                    >
+                      <span className="source-chip-num">{src.index}</span>
+                      <span className="source-chip-title">{src.entry.title}</span>
+                    </button>
+                  );
+                })}
               </div>
             )}
 

@@ -169,7 +169,7 @@ if ($mode === 'google') {
     ask_avi_record_chat_telemetry(null, 401, 'gemini', $latencyMs, 'auth_required: Gemini models require a signed-in account');
     ask_avi_send_json(401, [
       'error' => 'auth_required',
-      'message' => 'Sign in or create a free account to unlock frontier models and larger context limits.',
+      'message' => 'Unlock frontier models, deeper context, and saved conversations.',
     ]);
   }
 

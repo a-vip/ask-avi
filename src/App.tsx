@@ -60,12 +60,7 @@ export default function App() {
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth <= 860 : false
   );
-  const [sidebarOpen, setSidebarOpen] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('embed') === '1') return false;
-    return window.innerWidth > 860;
-  });
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<'cited' | 'archive'>('archive');
@@ -188,7 +183,7 @@ export default function App() {
     setSignInNotice(
       customNotice ??
         (pendingEngineId
-          ? 'Sign in or create a free account to unlock frontier models and larger context limits.'
+          ? 'Unlock frontier models, deeper context, and saved conversations.'
           : '')
     );
     setSignInOpen(true);

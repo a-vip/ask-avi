@@ -329,7 +329,6 @@ if ($action === 'signup' || $action === 'signin') {
   $email = strtolower(trim((string) ($body['email'] ?? '')));
   $password = (string) ($body['password'] ?? '');
   $nameInput = trim((string) ($body['name'] ?? ''));
-  $adminPasscode = trim((string) ($body['adminPasscode'] ?? ''));
   $optIn = !empty($body['marketingOptIn']) ? 1 : 0;
 
   if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -340,31 +339,26 @@ if ($action === 'signup' || $action === 'signin') {
   }
 
   $isAdminTarget = ($email === ASK_AVI_ADMIN_EMAIL);
-  if ($isAdminTarget) {
-    $configuredPasscode = trim((string) ($settings['admin_passcode'] ?? ''));
-    if ($configuredPasscode === '' || !hash_equals($configuredPasscode, $adminPasscode)) {
-      ask_avi_record_log([
-        'type' => 'auth_denied',
-        'level' => 'warn',
-        'user_email' => $email,
-        'status_code' => 403,
-        'message' => "Denied unverified admin {$action} attempt.",
-      ]);
-      ask_avi_send_json(403, [
-        'ok' => false,
-        'error' => $configuredPasscode === ''
-          ? 'Set Admin Passcode in WP Admin -> Ask Avi, or sign in via Google.'
-          : 'Invalid admin verification passcode for workwithavip@gmail.com.',
-      ]);
-    }
-  }
-
+  $isWpAdminSession = function_exists('current_user_can') && current_user_can('manage_options');
   $existing = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$users_table} WHERE email = %s", $email), ARRAY_A);
   $nowMs = (int) round(microtime(true) * 1000);
 
   if ($action === 'signup') {
     if ($existing) {
       ask_avi_send_json(409, ['ok' => false, 'error' => 'An account with this email already exists. Please sign in instead.']);
+    }
+    if ($isAdminTarget && !$isWpAdminSession) {
+      ask_avi_record_log([
+        'type' => 'auth_denied',
+        'level' => 'warn',
+        'user_email' => $email,
+        'status_code' => 403,
+        'message' => 'Denied unverified public admin signup attempt.',
+      ]);
+      ask_avi_send_json(403, [
+        'ok' => false,
+        'error' => 'This email belongs to the site administrator. Set your Ask Avi admin password in WP Admin -> Ask Avi, or sign in via Google.',
+      ]);
     }
     $row = [
       'id' => 'u_' . bin2hex(random_bytes(6)),
@@ -400,7 +394,7 @@ if ($action === 'signup' || $action === 'signin') {
 
   // signin
   if (!$existing) {
-    if ($isAdminTarget) {
+    if ($isAdminTarget && $isWpAdminSession) {
       $row = [
         'id' => 'u_' . bin2hex(random_bytes(6)),
         'email' => $email,
@@ -417,20 +411,32 @@ if ($action === 'signup' || $action === 'signin') {
         'error_count' => 0,
       ];
       if (!ask_avi_insert_user_row($users_table, $row)) {
-      ask_avi_send_json(500, ['ok' => false, 'error' => 'Could not persist account in database: ' . ($wpdb->last_error ?: 'unknown error')]);
-    }
+        ask_avi_send_json(500, ['ok' => false, 'error' => 'Could not persist account in database: ' . ($wpdb->last_error ?: 'unknown error')]);
+      }
       ask_avi_record_log([
         'type' => 'auth_signup',
         'level' => 'info',
         'user_email' => $email,
         'status_code' => 200,
-        'message' => 'Verified admin signed in & initialized admin profile.',
+        'message' => 'WP-verified admin signed in & initialized admin profile.',
       ]);
       $token = ask_avi_issue_token_for_row($row);
       ask_avi_send_json(200, ['ok' => true, 'user' => ask_avi_format_client_user($row, $token)]);
     }
+    if ($isAdminTarget) {
+      ask_avi_send_json(403, [
+        'ok' => false,
+        'error' => 'Set your Ask Avi admin password in WP Admin -> Ask Avi, or continue with Google Sign-In.',
+      ]);
+    }
     ask_avi_send_json(401, ['ok' => false, 'error' => 'No account found for that email. Switch to Create account to sign up.']);
   }
+
+  $updateFields = [
+    'last_seen_at' => $nowMs,
+    'login_count' => ((int) $existing['login_count']) + 1,
+    'role' => $isAdminTarget ? 'admin' : (string) $existing['role'],
+  ];
 
   if (!empty($existing['password_hash'])) {
     if (!password_verify($password, (string) $existing['password_hash'])) {
@@ -443,16 +449,19 @@ if ($action === 'signup' || $action === 'signin') {
       ]);
       ask_avi_send_json(401, ['ok' => false, 'error' => 'Incorrect email or password.']);
     }
-  } elseif ($existing['provider'] === 'google' && !$isAdminTarget) {
+  } elseif ($isAdminTarget && $isWpAdminSession) {
+    $updateFields['password_hash'] = password_hash($password, PASSWORD_DEFAULT);
+  } elseif ($isAdminTarget) {
+    ask_avi_send_json(403, [
+      'ok' => false,
+      'error' => 'Set your Ask Avi admin password in WP Admin -> Ask Avi, or continue with Google Sign-In.',
+    ]);
+  } else {
     ask_avi_send_json(400, ['ok' => false, 'error' => 'This account uses Google Sign-In. Please continue with Google.']);
   }
 
-  $role = $isAdminTarget ? 'admin' : (string) $existing['role'];
-  $wpdb->update($users_table, [
-    'last_seen_at' => $nowMs,
-    'login_count' => ((int) $existing['login_count']) + 1,
-    'role' => $role,
-  ], ['id' => $existing['id']]);
+  $role = $updateFields['role'];
+  $wpdb->update($users_table, $updateFields, ['id' => $existing['id']]);
   $existing['last_seen_at'] = $nowMs;
   $existing['role'] = $role;
 
@@ -487,7 +496,6 @@ if ($action === 'save_server_settings') {
     'openRouterApiKey' => 'openrouter_api_key',
     'geminiApiKey' => 'gemini_api_key',
     'googleClientId' => 'google_client_id',
-    'adminPasscode' => 'admin_passcode',
   ];
   $clearKeys = is_array($body['clearKeys'] ?? null) ? $body['clearKeys'] : [];
 

@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
  * provision database tables, and purge LiteSpeed caches on new theme version rollout.
  */
 add_action('init', static function () {
-  if (get_option('ask_avi_deployment_ver') === '20261114b') {
+  if (get_option('ask_avi_deployment_ver') === '20261114c') {
     return;
   }
 
@@ -45,7 +45,7 @@ add_action('init', static function () {
     }
   }
 
-  update_option('ask_avi_deployment_ver', '20261114b', false);
+  update_option('ask_avi_deployment_ver', '20261114c', false);
   flush_rewrite_rules(false);
   do_action('litespeed_purge_all');
   if (class_exists('\LiteSpeed\Purge')) {
@@ -171,11 +171,24 @@ function ask_avi_render_admin_page(): void {
   $logs_table = $wpdb->prefix . 'ask_avi_logs';
   $users_exists = ($wpdb->get_var("SHOW TABLES LIKE '{$users_table}'") === $users_table);
   $users = $users_exists
-    ? ($wpdb->get_results("SELECT * FROM {$users_table} ORDER BY last_seen_at DESC LIMIT 200", ARRAY_A) ?: [])
+    ? ($wpdb->get_results("SELECT * FROM {$users_table} ORDER BY last_seen_at DESC LIMIT 500", ARRAY_A) ?: [])
     : [];
   $logs = $users_exists
-    ? ($wpdb->get_results("SELECT * FROM {$logs_table} ORDER BY ts DESC LIMIT 60", ARRAY_A) ?: [])
+    ? ($wpdb->get_results("SELECT * FROM {$logs_table} ORDER BY ts DESC LIMIT 80", ARRAY_A) ?: [])
     : [];
+
+  $totalUsers = count($users);
+  $optInUsers = 0;
+  $googleUsers = 0;
+  $emailUsers = 0;
+  foreach ($users as $u) {
+    if (!empty($u['marketing_opt_in'])) $optInUsers++;
+    if (($u['provider'] ?? '') === 'google') $googleUsers++;
+    elseif (($u['provider'] ?? '') === 'email') $emailUsers++;
+  }
+  $dayAgoMs = (int) round(microtime(true) * 1000) - (24 * 60 * 60 * 1000);
+  $chats24h = $users_exists ? (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$logs_table} WHERE ts >= %d AND type IN ('chat_ok','chat_error')", $dayAgoMs)) : 0;
+  $errTotal = $users_exists ? (int) $wpdb->get_var("SELECT COUNT(*) FROM {$logs_table} WHERE level = 'error'") : 0;
   ?>
   <div class="wrap">
     <h1>Ask Avi — AI Persona Administration</h1>
@@ -184,6 +197,29 @@ function ask_avi_render_admin_page(): void {
       (shortlink: <code><?php echo esc_html(home_url('/ask/')); ?></code>) ·
       <a href="<?php echo esc_url(home_url('/ask-avi/')); ?>" target="_blank" class="button button-secondary" style="margin-left:8px;">Open Live Ask Avi (/ask-avi/) &nearr;</a>
     </p>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:16px 0 20px;">
+      <div style="background:#fff;border:1px solid #ccd0d4;border-radius:6px;padding:12px 14px;">
+        <div style="font-size:11px;text-transform:uppercase;color:#646970;">Registered Accounts</div>
+        <div style="font-size:22px;font-weight:700;margin-top:4px;"><?php echo (int) $totalUsers; ?></div>
+        <div style="font-size:12px;color:#646970;">Google: <?php echo (int) $googleUsers; ?> · Email: <?php echo (int) $emailUsers; ?></div>
+      </div>
+      <div style="background:#fff;border:1px solid #ccd0d4;border-radius:6px;padding:12px 14px;">
+        <div style="font-size:11px;text-transform:uppercase;color:#646970;">Mailing List Opt-Ins</div>
+        <div style="font-size:22px;font-weight:700;margin-top:4px;"><?php echo (int) $optInUsers; ?></div>
+        <div style="font-size:12px;color:#646970;">Synced to WP Leads</div>
+      </div>
+      <div style="background:#fff;border:1px solid #ccd0d4;border-radius:6px;padding:12px 14px;">
+        <div style="font-size:11px;text-transform:uppercase;color:#646970;">Chats (Last 24h)</div>
+        <div style="font-size:22px;font-weight:700;margin-top:4px;"><?php echo (int) $chats24h; ?></div>
+        <div style="font-size:12px;color:#646970;">Live &amp; authenticated turns</div>
+      </div>
+      <div style="background:#fff;border:1px solid #ccd0d4;border-radius:6px;padding:12px 14px;">
+        <div style="font-size:11px;text-transform:uppercase;color:#646970;">Logged Errors</div>
+        <div style="font-size:22px;font-weight:700;margin-top:4px;color:<?php echo $errTotal > 0 ? '#b32d2e' : '#008a20'; ?>;"><?php echo (int) $errTotal; ?></div>
+        <div style="font-size:12px;color:#646970;">Diagnostics &amp; rate guards</div>
+      </div>
+    </div>
 
     <?php if ($saved): ?>
       <div class="notice notice-success is-dismissible"><p>Ask Avi backend keys saved securely in WordPress options.</p></div>
@@ -225,15 +261,24 @@ function ask_avi_render_admin_page(): void {
       </p>
     </form>
 
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px;">
       <h2 style="margin:0;">Registered Users (<?php echo count($users); ?>)</h2>
-      <?php if (!empty($users)): ?>
-        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-          <input type="hidden" name="action" value="ask_avi_export_csv" />
-          <?php wp_nonce_field('ask_avi_export_csv'); ?>
-          <button type="submit" class="button">Export Users CSV</button>
-        </form>
-      <?php endif; ?>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <input
+          type="search"
+          id="ask-avi-user-filter"
+          placeholder="Search name, email, or provider…"
+          style="min-width:240px;"
+          oninput="var q=this.value.toLowerCase();document.querySelectorAll('#ask-avi-users-tbody tr[data-search]').forEach(function(r){r.style.display=r.getAttribute('data-search').indexOf(q)!==-1?'':'none';});"
+        />
+        <?php if (!empty($users)): ?>
+          <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin:0;">
+            <input type="hidden" name="action" value="ask_avi_export_csv" />
+            <?php wp_nonce_field('ask_avi_export_csv'); ?>
+            <button type="submit" class="button">Export Users CSV</button>
+          </form>
+        <?php endif; ?>
+      </div>
     </div>
 
     <table class="widefat striped" style="margin-bottom:24px;">
@@ -244,21 +289,25 @@ function ask_avi_render_admin_page(): void {
           <th>Provider</th>
           <th>Role</th>
           <th>List Opt-In</th>
+          <th>Logins</th>
           <th>Chats (Errors)</th>
+          <th>Signed Up</th>
           <th>Last Seen</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="ask-avi-users-tbody">
         <?php if (empty($users)): ?>
-          <tr><td colspan="7">No registered users yet.</td></tr>
+          <tr><td colspan="9">No registered users yet.</td></tr>
         <?php else: foreach ($users as $u): ?>
-          <tr>
-            <td><?php echo esc_html($u['name']); ?></td>
+          <tr data-search="<?php echo esc_attr(strtolower($u['name'] . ' ' . $u['email'] . ' ' . $u['provider'])); ?>">
+            <td><strong><?php echo esc_html($u['name']); ?></strong></td>
             <td><?php echo esc_html($u['email']); ?></td>
-            <td><?php echo esc_html($u['provider']); ?></td>
+            <td><code><?php echo esc_html($u['provider']); ?></code></td>
             <td><?php echo esc_html($u['role']); ?></td>
             <td><?php echo !empty($u['marketing_opt_in']) ? 'Yes' : 'No'; ?></td>
+            <td><?php echo (int) $u['login_count']; ?></td>
             <td><?php echo (int) $u['chat_count']; ?> (<?php echo (int) $u['error_count']; ?> err)</td>
+            <td><?php echo esc_html(gmdate('Y-m-d H:i', (int) floor(((int) $u['created_at']) / 1000)) . ' UTC'); ?></td>
             <td><?php echo esc_html(gmdate('Y-m-d H:i', (int) floor(((int) $u['last_seen_at']) / 1000)) . ' UTC'); ?></td>
           </tr>
         <?php endforeach; endif; ?>

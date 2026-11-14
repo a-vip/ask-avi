@@ -1,6 +1,10 @@
 Options -Indexes
 RewriteEngine On
 
+<IfModule mod_mime.c>
+  AddType text/javascript .mjs
+</IfModule>
+
 # Preserve Authorization header across FastCGI / LiteSpeed SAPI
 RewriteCond %{HTTP:Authorization} .
 RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
@@ -17,9 +21,10 @@ RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
   </FilesMatch>
 </IfModule>
 
-# Route ./api/chat and ./api/auth cleanly to PHP handlers
+# Route ./api/chat, ./api/auth, and ./api/context cleanly to PHP handlers
 RewriteRule ^api/chat/?$ api/chat.php [L,QSA]
 RewriteRule ^api/auth/?$ api/auth.php [L,QSA]
+RewriteRule ^api/context/?$ api/context.php [L,QSA]
 
 # Serve existing files & assets directly; otherwise SPA index.html
 RewriteCond %{REQUEST_FILENAME} -f [OR]

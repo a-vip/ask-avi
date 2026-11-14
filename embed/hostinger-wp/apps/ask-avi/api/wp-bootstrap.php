@@ -91,12 +91,15 @@ function ask_avi_ensure_tables(): void {
   }
   $checked = true;
 
-  if (function_exists('get_option') && get_option('ask_avi_schema_ver') === ASK_AVI_SCHEMA_VER) {
+  $users_table = $wpdb->prefix . 'ask_avi_users';
+  $logs_table = $wpdb->prefix . 'ask_avi_logs';
+  $hasUsers = ($wpdb->get_var("SHOW TABLES LIKE '{$users_table}'") === $users_table);
+  $hasLogs = ($wpdb->get_var("SHOW TABLES LIKE '{$logs_table}'") === $logs_table);
+
+  if ($hasUsers && $hasLogs && function_exists('get_option') && get_option('ask_avi_schema_ver') === ASK_AVI_SCHEMA_VER) {
     return;
   }
 
-  $users_table = $wpdb->prefix . 'ask_avi_users';
-  $logs_table = $wpdb->prefix . 'ask_avi_logs';
   $charset_collate = $wpdb->get_charset_collate();
 
   require_once ABSPATH . 'wp-admin/includes/upgrade.php';

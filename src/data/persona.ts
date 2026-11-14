@@ -28,6 +28,7 @@ export const ENGINE_OPTIONS: EngineOption[] = [
     shortName: 'Gemini 3 Flash',
     badge: 'Google',
     providerKind: 'google',
+    requiresAuth: true,
     description:
       'Optional Google Gemini 3 Flash extended thinking (8k budget) with live web grounding.',
     geminiModelId: 'gemini-3-flash-preview',
@@ -45,6 +46,7 @@ export const ENGINE_OPTIONS: EngineOption[] = [
     shortName: 'Gemini 4 Deep',
     badge: 'Google · Deep',
     providerKind: 'google',
+    requiresAuth: true,
     description:
       'Optional Google Gemini 4 Hydrogen deep thinking (16k budget) for complex philosophy, strategy, law, and coding.',
     geminiModelId: 'gemini-4-hydrogen',
@@ -208,8 +210,11 @@ export function buildAviSystemPrompt(
         .join('\n\n')
     : '';
 
-  const attachedBlock = attachedSnippet
-    ? `\n\nUSER-ATTACHED DOCUMENT (respond directly to this):\n${attachedSnippet.slice(0, 2400)}`
+  const trimmedAttached = attachedSnippet?.trim() ?? '';
+  const attachedBlock = trimmedAttached
+    ? trimmedAttached.startsWith('USER-ATTACHED CONTEXT')
+      ? `\n\n${trimmedAttached.slice(0, 8800)}`
+      : `\n\nUSER-ATTACHED DOCUMENT (respond directly to this):\n${trimmedAttached.slice(0, 8800)}`
     : '';
 
   const webBlock = liveWebContext?.trim() ? `\n\n${liveWebContext.trim()}` : '';

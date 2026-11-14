@@ -4,6 +4,7 @@ import { extname, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { handleGeminiProxyRequest, type ProxyEnv } from '../shared/geminiProxy.ts';
+import { fetchPublicUrlContext } from '../shared/urlFetcher.ts';
 
 const ROOT_DIR = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DIST_DIR = join(ROOT_DIR, 'dist');
@@ -55,7 +56,12 @@ async function readBodyBuffer(req: IncomingMessage): Promise<Uint8Array | undefi
   return chunks.length ? Buffer.concat(chunks) : undefined;
 }
 
-async function handleApiRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function handleApiRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  preReadBody?: Uint8Array,
+  bearerUser?: { email: string; role: string } | null
+): Promise<void> {
   const headers = new Headers();
   for (const [k, v] of Object.entries(req.headers)) {
     if (Array.isArray(v)) {
@@ -65,7 +71,31 @@ async function handleApiRequest(req: IncomingMessage, res: ServerResponse): Prom
     }
   }
 
-  const body = await readBodyBuffer(req);
+  const body = preReadBody ?? (await readBodyBuffer(req));
+  if (req.method === 'POST' && body) {
+    try {
+      const parsed = JSON.parse(Buffer.from(body).toString('utf8')) as {
+        mode?: string;
+        model?: string;
+      };
+      const isGoogleMode =
+        parsed.mode === 'google' ||
+        (typeof parsed.model === 'string' && parsed.model.toLowerCase().startsWith('gemini'));
+      if (isGoogleMode && !bearerUser) {
+        res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(
+          JSON.stringify({
+            error: 'auth_required',
+            message: 'Sign in or create a free account to use Gemini models.',
+          })
+        );
+        return;
+      }
+    } catch {
+      // Let proxy validate malformed JSON
+    }
+  }
+
   const webRequest = new Request(`http://127.0.0.1:${PORT}${req.url ?? '/api/chat'}`, {
     method: req.method,
     headers,
@@ -123,6 +153,34 @@ const server = createServer(async (req, res) => {
       await authMod.handleAuthRequest(req, reqUrl, res);
       return;
     }
+    if (reqUrl.pathname === '/api/context') {
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: 'Method not allowed.' }));
+        return;
+      }
+      try {
+        const raw = await readBodyBuffer(req);
+        const payload = JSON.parse(raw ? Buffer.from(raw).toString('utf8') : '{}') as { url?: string };
+        const result = await fetchPublicUrlContext(String(payload.url ?? '').trim());
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, ...result, kind: 'link' }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : 'Unable to fetch link.',
+          })
+        );
+      }
+      return;
+    }
     if (reqUrl.pathname === '/api/chat') {
       const startedAt = Date.now();
       const bearerUser = authMod.extractBearerUser(req);
@@ -173,7 +231,8 @@ const server = createServer(async (req, res) => {
         });
       });
 
-      await handleApiRequest(req, res);
+      const rawChatBody = await readBodyBuffer(req);
+      await handleApiRequest(req, res, rawChatBody, bearerUser);
       return;
     }
     serveStaticAsset(reqUrl.pathname, res);

@@ -7,13 +7,15 @@ import { SettingsModal } from './components/SettingsModal';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { WelcomeScreen } from './components/WelcomeScreen';
-import { BackendNotConfiguredError, llmService } from './engine/llmService';
+import { ENGINE_OPTIONS } from './data/persona';
+import { AuthRequiredError, BackendNotConfiguredError, llmService } from './engine/llmService';
 import {
   fetchAuthConfig,
   isVerifiedAdmin,
   reportClientTelemetry,
   type AuthConfigResponse,
 } from './utils/authClient';
+import { allocateContextBudget, MAX_CONTEXT_ITEMS } from './utils/contextExtractor';
 import type {
   AppSettings,
   AttachedContext,
@@ -50,7 +52,9 @@ export default function App() {
   const [isTemporaryChat, setIsTemporaryChat] = useState(false);
 
   const [inputValue, setInputValue] = useState('');
-  const [attachedContext, setAttachedContext] = useState<AttachedContext | null>(null);
+  const [attachedContexts, setAttachedContexts] = useState<AttachedContext[]>([]);
+  const [pendingEngineAfterAuth, setPendingEngineAfterAuth] = useState<EngineId | null>(null);
+  const [signInNotice, setSignInNotice] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
 
   const [isMobile, setIsMobile] = useState(() =>
@@ -162,6 +166,26 @@ export default function App() {
   useEffect(() => {
     saveUserProfile(userProfile);
   }, [userProfile]);
+
+  const isAuthenticated = Boolean(userProfile);
+
+  useEffect(() => {
+    if (isAuthenticated) return;
+    const selectedOpt = ENGINE_OPTIONS.find((o) => o.id === settings.engineId);
+    if (selectedOpt?.requiresAuth) {
+      setSettings((prev) => ({ ...prev, engineId: 'oss-reasoning' }));
+    }
+  }, [isAuthenticated, settings.engineId]);
+
+  const handleRequireSignIn = useCallback((pendingEngineId?: EngineId) => {
+    setPendingEngineAfterAuth(pendingEngineId ?? null);
+    setSignInNotice(
+      pendingEngineId
+        ? 'Sign in or create a free account to unlock Google Gemini models. Free open-source models remain open without an account.'
+        : ''
+    );
+    setSignInOpen(true);
+  }, []);
 
   const refreshAuthConfig = useCallback(async () => {
     const cfg = await fetchAuthConfig(userProfile?.sessionToken, settings.proxyUrl);
@@ -277,7 +301,7 @@ export default function App() {
       queryText: string,
       assistantMsgId: string,
       overrideEngineId?: EngineId,
-      attached?: AttachedContext | null
+      attached?: AttachedContext[]
     ) => {
       const controller = new AbortController();
       abortRef.current = controller;
@@ -298,7 +322,7 @@ export default function App() {
           geminiApiKey: settings.geminiApiKey,
           proxyUrl: settings.proxyUrl,
           sessionToken: userProfile?.sessionToken,
-          attachedContext: attached ?? undefined,
+          attachedContexts: attached,
           customApi: settings.customApi,
           signal: controller.signal,
           onUpdate: (update) => {
@@ -344,13 +368,14 @@ export default function App() {
       } catch (err) {
         const isAbort = err instanceof DOMException && err.name === 'AbortError';
         const needsSetup = err instanceof BackendNotConfiguredError;
+        const needsAuth = err instanceof AuthRequiredError;
         const messageText = isAbort
           ? '*Generation stopped.*'
           : err instanceof Error
             ? err.message
             : 'Unable to reach AI service. Please check your connection or try again.';
 
-        if (!isAbort) {
+        if (!isAbort && !needsAuth) {
           void reportClientTelemetry(
             {
               event: needsSetup ? 'backend_unconfigured' : 'chat_client_error',
@@ -372,6 +397,7 @@ export default function App() {
                   isThinking: false,
                   isStreaming: false,
                   needsBackendSetup: needsSetup,
+                  needsAuth,
                 }
               : m
           )
@@ -400,12 +426,19 @@ export default function App() {
       const text = (overridePrompt ?? inputValue).trim();
       if (!text || isStreaming) return;
 
+      const selectedOpt = ENGINE_OPTIONS.find((o) => o.id === settings.engineId);
+      if (selectedOpt?.requiresAuth && !userProfile) {
+        handleRequireSignIn(selectedOpt.id);
+        return;
+      }
+
+      const allocated = allocateContextBudget(attachedContexts).items;
       const userMsg: ChatMessage = {
         id: makeId('u'),
         role: 'user',
         content: text,
         createdAt: Date.now(),
-        attachedContext: attachedContext ?? undefined,
+        attachedContexts: allocated.length > 0 ? allocated : undefined,
       };
       const assistantMsg: ChatMessage = {
         id: makeId('a'),
@@ -417,9 +450,9 @@ export default function App() {
         isStreaming: true,
       };
 
-      const contextSnapshot = attachedContext;
+      const contextSnapshot = allocated;
       if (!overridePrompt) setInputValue('');
-      setAttachedContext(null);
+      setAttachedContexts([]);
 
       let targetThreadId = activeThread?.id ?? null;
       const priorMessages = activeThread?.messages ?? [];
@@ -461,8 +494,11 @@ export default function App() {
     [
       inputValue,
       isStreaming,
-      attachedContext,
+      attachedContexts,
+      settings.engineId,
       settings.voiceStyle,
+      userProfile,
+      handleRequireSignIn,
       activeThread,
       isTemporaryChat,
       updateThreadMessages,
@@ -491,7 +527,7 @@ export default function App() {
     setTempThread(null);
     setActiveThreadId(null);
     setInputValue('');
-    setAttachedContext(null);
+    setAttachedContexts([]);
     setTimeout(() => inputRef.current?.focus(), 60);
   };
 
@@ -519,13 +555,16 @@ export default function App() {
       idx === 0 ? deriveThreadTitle(newContent) : undefined
     );
 
+    const prevAttachments =
+      targetMsg.attachedContexts ?? (targetMsg.attachedContext ? [targetMsg.attachedContext] : undefined);
+
     await runAssistantTurn(
       activeThread.id,
       truncatedHistory,
       newContent,
       nextAssistant.id,
       undefined,
-      targetMsg.attachedContext
+      prevAttachments
     );
   };
 
@@ -556,13 +595,16 @@ export default function App() {
       })
     );
 
+    const prevAttachments =
+      userMsg.attachedContexts ?? (userMsg.attachedContext ? [userMsg.attachedContext] : undefined);
+
     await runAssistantTurn(
       activeThread.id,
       historyBefore,
       userMsg.content,
       newAssistantId,
       undefined,
-      userMsg.attachedContext
+      prevAttachments
     );
   };
 
@@ -585,25 +627,30 @@ export default function App() {
     setKnowledgeOpen(true);
   };
 
-  const handleAskAboutEntry = (entry: KnowledgeEntry) => {
-    setAttachedContext({
+  const appendDossierContext = (entry: KnowledgeEntry) => {
+    const nextItem: AttachedContext = {
       id: entry.id,
       title: entry.title,
       content: `${entry.summary}\n\n${entry.chunks.join('\n\n')}`,
       sourceUrl: entry.url,
+      kind: 'dossier',
+    };
+    setAttachedContexts((prev) => {
+      const deduped = prev.filter((item) => item.id !== nextItem.id);
+      const next = [...deduped, nextItem].slice(-MAX_CONTEXT_ITEMS);
+      return allocateContextBudget(next).items;
     });
+  };
+
+  const handleAskAboutEntry = (entry: KnowledgeEntry) => {
+    appendDossierContext(entry);
     setInputValue(`Let’s discuss your argument in "${entry.title}" and how it applies right now.`);
     if (isMobile) setKnowledgeOpen(false);
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
   const handleAttachEntry = (entry: KnowledgeEntry) => {
-    setAttachedContext({
-      id: entry.id,
-      title: entry.title,
-      content: `${entry.summary}\n\n${entry.chunks.join('\n\n')}`,
-      sourceUrl: entry.url,
-    });
+    appendDossierContext(entry);
     if (isMobile) setKnowledgeOpen(false);
     setTimeout(() => inputRef.current?.focus(), 50);
   };
@@ -618,9 +665,17 @@ export default function App() {
 
   const hasMessages = Boolean(activeThread && activeThread.messages.length > 0);
 
-  const handleSelectEngine = useCallback((engineId: EngineId) => {
-    setSettings((prev) => ({ ...prev, engineId }));
-  }, []);
+  const handleSelectEngine = useCallback(
+    (engineId: EngineId) => {
+      const opt = ENGINE_OPTIONS.find((o) => o.id === engineId);
+      if (opt?.requiresAuth && !userProfile) {
+        handleRequireSignIn(engineId);
+        return;
+      }
+      setSettings((prev) => ({ ...prev, engineId }));
+    },
+    [userProfile, handleRequireSignIn]
+  );
 
   const handleToggleWebSearch = useCallback(() => {
     setSettings((prev) => ({ ...prev, webSearchEnabled: !prev.webSearchEnabled }));
@@ -671,8 +726,11 @@ export default function App() {
         onToggleTheme={handleToggleTheme}
         onOpenHelp={() => setAccountInfoMode('help')}
         onOpenAbout={() => setAccountInfoMode('about')}
-        onOpenSignIn={() => setSignInOpen(true)}
-        onSignOut={() => setUserProfile(null)}
+        onOpenSignIn={() => handleRequireSignIn()}
+        onSignOut={() => {
+          setUserProfile(null);
+          setPendingEngineAfterAuth(null);
+        }}
       />
 
       <div className="main-pane">
@@ -719,13 +777,17 @@ export default function App() {
               onChangeVoiceStyle={(voiceStyle: VoiceStyle) =>
                 setSettings((prev) => ({ ...prev, voiceStyle }))
               }
-              attachedContext={attachedContext}
-              onAttachContext={setAttachedContext}
+              attachedContexts={attachedContexts}
+              onAttachContexts={(items) => setAttachedContexts(allocateContextBudget(items).items)}
               onOpenDossierPicker={() => {
                 setDrawerTab('archive');
                 setKnowledgeOpen(true);
               }}
               isAdmin={isAdmin}
+              isAuthenticated={isAuthenticated}
+              onRequireSignIn={handleRequireSignIn}
+              proxyUrl={settings.proxyUrl}
+              sessionToken={userProfile?.sessionToken}
               inputRef={inputRef}
             />
           ) : (
@@ -747,6 +809,10 @@ export default function App() {
                     )
                   }
                   onOpenSettings={() => openSettingsModal(isAdmin ? 'developer' : 'general')}
+                  onOpenSignIn={() => handleRequireSignIn(settings.engineId)}
+                  onSwitchToFreeEngine={() =>
+                    setSettings((prev) => ({ ...prev, engineId: 'oss-reasoning' }))
+                  }
                 />
               ))}
               <div ref={messagesEndRef} className="scroll-anchor" />
@@ -771,13 +837,17 @@ export default function App() {
               onChangeVoiceStyle={(voiceStyle: VoiceStyle) =>
                 setSettings((prev) => ({ ...prev, voiceStyle }))
               }
-              attachedContext={attachedContext}
-              onAttachContext={setAttachedContext}
+              attachedContexts={attachedContexts}
+              onAttachContexts={(items) => setAttachedContexts(allocateContextBudget(items).items)}
               onOpenDossierPicker={() => {
                 setDrawerTab('archive');
                 setKnowledgeOpen(true);
               }}
               isAdmin={isAdmin}
+              isAuthenticated={isAuthenticated}
+              onRequireSignIn={handleRequireSignIn}
+              proxyUrl={settings.proxyUrl}
+              sessionToken={userProfile?.sessionToken}
               inputRef={inputRef}
             />
           </div>
@@ -804,7 +874,7 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         onUpdateSettings={setSettings}
         onToggleTheme={handleToggleTheme}
-        onOpenSignIn={() => setSignInOpen(true)}
+        onOpenSignIn={() => handleRequireSignIn()}
         onClearAllThreads={handleClearAllThreads}
         onExportAllThreads={handleExportAllThreads}
         onRefreshAuthConfig={() => void refreshAuthConfig()}
@@ -815,9 +885,24 @@ export default function App() {
         currentProfile={userProfile}
         authConfig={authConfig}
         proxyUrl={settings.proxyUrl}
-        onClose={() => setSignInOpen(false)}
-        onSignIn={setUserProfile}
-        onSignOut={() => setUserProfile(null)}
+        pendingNotice={signInNotice}
+        onClose={() => {
+          setSignInOpen(false);
+          setSignInNotice('');
+          setPendingEngineAfterAuth(null);
+        }}
+        onSignIn={(profile) => {
+          setUserProfile(profile);
+          if (pendingEngineAfterAuth) {
+            setSettings((prev) => ({ ...prev, engineId: pendingEngineAfterAuth }));
+            setPendingEngineAfterAuth(null);
+          }
+          setSignInNotice('');
+        }}
+        onSignOut={() => {
+          setUserProfile(null);
+          setPendingEngineAfterAuth(null);
+        }}
       />
 
       <AccountInfoModal

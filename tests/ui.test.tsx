@@ -357,4 +357,167 @@ describe('Minimalist Frontier UI Upgrades', () => {
     expect(guestBubble.container.textContent).not.toContain('Cloudflare');
     guestBubble.cleanup();
   });
+
+  it('locks Gemini models when signed out, unlocks when authenticated, and shows multi-context chips', () => {
+    const onSelectEngine = vi.fn();
+    const onRequireSignIn = vi.fn();
+    const onAttachContexts = vi.fn();
+
+    const guestComposer = mountTestElement(
+      <Composer
+        value=""
+        onChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onStop={vi.fn()}
+        isStreaming={false}
+        engineId="oss-reasoning"
+        webSearchEnabled
+        onSelectEngine={onSelectEngine}
+        onToggleWebSearch={vi.fn()}
+        onOpenSettings={vi.fn()}
+        voiceStyle="standard"
+        onChangeVoiceStyle={vi.fn()}
+        attachedContexts={[
+          { id: 'c1', title: 'SovDash Dossier', content: 'System architecture notes', kind: 'dossier' },
+          { id: 'c2', title: 'Geneva Brief', content: 'Public IHL brief excerpt', kind: 'link', sourceUrl: 'https://example.com' },
+        ]}
+        onAttachContexts={onAttachContexts}
+        onOpenDossierPicker={vi.fn()}
+        isAuthenticated={false}
+        onRequireSignIn={onRequireSignIn}
+      />
+    );
+
+    expect(guestComposer.container.querySelectorAll('.attached-chip').length).toBe(2);
+    expect(guestComposer.container.querySelector('.attached-budget-pill')?.textContent).toContain('2/4');
+    expect(guestComposer.container.textContent).toContain('DOSSIER');
+    expect(guestComposer.container.textContent).toContain('LINK');
+
+    const removeFirst = guestComposer.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Remove attachment SovDash Dossier"]'
+    );
+    act(() => {
+      removeFirst?.click();
+    });
+    expect(onAttachContexts).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 'c2', title: 'Geneva Brief' }),
+    ]);
+
+    const contextTrigger = Array.from(
+      guestComposer.container.querySelectorAll<HTMLButtonElement>('.tool-chip-btn')
+    ).find((b) => b.textContent?.includes('Context'));
+    act(() => {
+      contextTrigger?.click();
+    });
+    expect(guestComposer.container.textContent).toContain('Upload PDF, Docs, Slides, Text');
+    expect(guestComposer.container.textContent).toContain('Add web link (URL)');
+
+    const modelBtn = guestComposer.container.querySelector<HTMLButtonElement>('.composer-model-btn');
+    act(() => {
+      modelBtn?.click();
+    });
+
+    const geminiOpt = Array.from(
+      guestComposer.container.querySelectorAll<HTMLButtonElement>('.model-option')
+    ).find((b) => b.textContent?.includes('Gemini 3 Flash'));
+    expect(geminiOpt?.classList.contains('locked')).toBe(true);
+    expect(geminiOpt?.textContent).toContain('Sign in');
+
+    act(() => {
+      geminiOpt?.click();
+    });
+    expect(onRequireSignIn).toHaveBeenCalledWith('gemini-flash');
+    expect(onSelectEngine).not.toHaveBeenCalled();
+    guestComposer.cleanup();
+
+    const authedOnSelect = vi.fn();
+    const authedComposer = mountTestElement(
+      <Composer
+        value=""
+        onChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onStop={vi.fn()}
+        isStreaming={false}
+        engineId="oss-reasoning"
+        webSearchEnabled
+        onSelectEngine={authedOnSelect}
+        onToggleWebSearch={vi.fn()}
+        onOpenSettings={vi.fn()}
+        voiceStyle="standard"
+        onChangeVoiceStyle={vi.fn()}
+        attachedContexts={[]}
+        onAttachContexts={vi.fn()}
+        onOpenDossierPicker={vi.fn()}
+        isAuthenticated
+        onRequireSignIn={vi.fn()}
+      />
+    );
+
+    act(() => {
+      authedComposer.container.querySelector<HTMLButtonElement>('.composer-model-btn')?.click();
+    });
+    const authedGemini = Array.from(
+      authedComposer.container.querySelectorAll<HTMLButtonElement>('.model-option')
+    ).find((b) => b.textContent?.includes('Gemini 3 Flash'));
+    expect(authedGemini?.classList.contains('locked')).toBe(false);
+    act(() => {
+      authedGemini?.click();
+    });
+    expect(authedOnSelect).toHaveBeenCalledWith('gemini-flash');
+    authedComposer.cleanup();
+  });
+
+  it('renders auth prompt banner and actionable buttons for needsAuth messages and pendingNotice', () => {
+    const onOpenSignIn = vi.fn();
+    const onSwitchToFreeEngine = vi.fn();
+    const msg: ChatMessage = {
+      id: 'm-auth',
+      role: 'assistant',
+      content: 'Sign in or create a free account to unlock Google Gemini models.',
+      createdAt: Date.now(),
+      needsAuth: true,
+    };
+    const bubble = mountTestElement(
+      <MessageBubble
+        message={msg}
+        isLastAssistant
+        onEditUserMessage={vi.fn()}
+        onRegenerate={vi.fn()}
+        onFollowUpClick={vi.fn()}
+        onInspectSource={vi.fn()}
+        onFeedback={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onOpenSignIn={onOpenSignIn}
+        onSwitchToFreeEngine={onSwitchToFreeEngine}
+      />
+    );
+    expect(bubble.container.textContent).toContain('Sign in to unlock Gemini');
+    expect(bubble.container.textContent).toContain('Use Free Open-Source');
+    act(() => {
+      Array.from(bubble.container.querySelectorAll<HTMLButtonElement>('button'))
+        .find((b) => b.textContent?.includes('Sign in to unlock Gemini'))
+        ?.click();
+      Array.from(bubble.container.querySelectorAll<HTMLButtonElement>('button'))
+        .find((b) => b.textContent?.includes('Use Free Open-Source'))
+        ?.click();
+    });
+    expect(onOpenSignIn).toHaveBeenCalledTimes(1);
+    expect(onSwitchToFreeEngine).toHaveBeenCalledTimes(1);
+    bubble.cleanup();
+
+    const noticeModal = mountTestElement(
+      <SignInModal
+        isOpen
+        currentProfile={null}
+        pendingNotice="Sign in to unlock Google Gemini models."
+        onClose={vi.fn()}
+        onSignIn={vi.fn()}
+        onSignOut={vi.fn()}
+      />
+    );
+    expect(noticeModal.container.querySelector('.auth-pending-notice')?.textContent).toContain(
+      'Sign in to unlock Google Gemini models.'
+    );
+    noticeModal.cleanup();
+  });
 });

@@ -18,10 +18,16 @@ interface WelcomeScreenProps {
   onOpenSettings: () => void;
   voiceStyle: VoiceStyle;
   onChangeVoiceStyle: (style: VoiceStyle) => void;
-  attachedContext: AttachedContext | null;
-  onAttachContext: (ctx: AttachedContext | null) => void;
+  attachedContext?: AttachedContext | null;
+  onAttachContext?: (ctx: AttachedContext | null) => void;
+  attachedContexts?: AttachedContext[];
+  onAttachContexts?: (items: AttachedContext[]) => void;
   onOpenDossierPicker: () => void;
   isAdmin?: boolean;
+  isAuthenticated?: boolean;
+  onRequireSignIn?: (pendingEngineId?: EngineId) => void;
+  proxyUrl?: string;
+  sessionToken?: string;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
 }
 
@@ -40,10 +46,16 @@ export function WelcomeScreen({
   onOpenSettings,
   voiceStyle,
   onChangeVoiceStyle,
-  attachedContext,
+  attachedContext = null,
   onAttachContext,
+  attachedContexts,
+  onAttachContexts,
   onOpenDossierPicker,
   isAdmin = false,
+  isAuthenticated = false,
+  onRequireSignIn,
+  proxyUrl,
+  sessionToken,
   inputRef,
 }: WelcomeScreenProps) {
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
@@ -86,8 +98,14 @@ export function WelcomeScreen({
           onChangeVoiceStyle={onChangeVoiceStyle}
           attachedContext={attachedContext}
           onAttachContext={onAttachContext}
+          attachedContexts={attachedContexts}
+          onAttachContexts={onAttachContexts}
           onOpenDossierPicker={onOpenDossierPicker}
           isAdmin={isAdmin}
+          isAuthenticated={isAuthenticated}
+          onRequireSignIn={onRequireSignIn}
+          proxyUrl={proxyUrl}
+          sessionToken={sessionToken}
           centered
           inputRef={inputRef}
         />

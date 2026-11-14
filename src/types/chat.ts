@@ -45,11 +45,16 @@ export interface WebSource {
   url: string;
 }
 
+export type AttachedContextKind = 'dossier' | 'pdf' | 'doc' | 'slides' | 'link' | 'text';
+
 export interface AttachedContext {
   id: string;
   title: string;
   content: string;
   sourceUrl?: string;
+  kind?: AttachedContextKind;
+  originalChars?: number;
+  trimmed?: boolean;
 }
 
 export interface ChatMessage {
@@ -69,9 +74,11 @@ export interface ChatMessage {
   retrievalMs?: number;
   followUps?: string[];
   attachedContext?: AttachedContext;
+  attachedContexts?: AttachedContext[];
   feedback?: 'up' | 'down' | null;
   isStreaming?: boolean;
   needsBackendSetup?: boolean;
+  needsAuth?: boolean;
   error?: string;
 }
 
@@ -100,6 +107,7 @@ export interface EngineOption {
   badge: string;
   description: string;
   providerKind: EngineProviderKind;
+  requiresAuth?: boolean;
   geminiModelId?: GeminiModelId;
   geminiFallbackModels?: GeminiModelId[];
   thinkingBudget?: number;

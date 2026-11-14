@@ -8,7 +8,10 @@ import {
   FileText,
   Globe,
   KeyRound,
+  Link2,
+  LogIn,
   Pencil,
+  Presentation,
   RotateCcw,
   Search,
   Sparkles,
@@ -33,6 +36,8 @@ interface MessageBubbleProps {
   onInspectSource: (sources: RetrievedSource[], focusIndex: number) => void;
   onFeedback: (messageId: string, vote: 'up' | 'down' | null) => void;
   onOpenSettings: () => void;
+  onOpenSignIn?: () => void;
+  onSwitchToFreeEngine?: () => void;
 }
 
 export function MessageBubble({
@@ -46,6 +51,8 @@ export function MessageBubble({
   onInspectSource,
   onFeedback,
   onOpenSettings,
+  onOpenSignIn,
+  onSwitchToFreeEngine,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -181,13 +188,34 @@ export function MessageBubble({
   };
 
   if (message.role === 'user') {
+    const userAttachments =
+      message.attachedContexts && message.attachedContexts.length > 0
+        ? message.attachedContexts
+        : message.attachedContext
+          ? [message.attachedContext]
+          : [];
+
     return (
       <div className="msg-row msg-user-row">
         <div className="msg-user-col">
-          {message.attachedContext && (
-            <div className="msg-user-attachment">
-              <FileText size={12} />
-              <span>{message.attachedContext.title}</span>
+          {userAttachments.length > 0 && (
+            <div className="msg-user-attachments-wrap">
+              {userAttachments.map((att) => {
+                const Icon =
+                  att.kind === 'link'
+                    ? Link2
+                    : att.kind === 'slides'
+                      ? Presentation
+                      : att.kind === 'dossier'
+                        ? BookOpen
+                        : FileText;
+                return (
+                  <div key={att.id} className="msg-user-attachment" title={att.sourceUrl || att.title}>
+                    <Icon size={12} />
+                    <span>{att.title}</span>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -374,6 +402,28 @@ export function MessageBubble({
               </button>
             )}
           </div>
+        ) : message.needsAuth ? (
+          <div className="setup-prompt-card">
+            <p className="setup-prompt-text">{message.content}</p>
+            <div className="setup-prompt-actions">
+              {onOpenSignIn && (
+                <button type="button" className="btn-primary-sm" onClick={onOpenSignIn}>
+                  <LogIn size={14} />
+                  <span>Sign in to unlock Gemini</span>
+                </button>
+              )}
+              {onSwitchToFreeEngine && (
+                <button
+                  type="button"
+                  className="btn-secondary-sm"
+                  onClick={onSwitchToFreeEngine}
+                >
+                  <Sparkles size={14} />
+                  <span>Use Free Open-Source</span>
+                </button>
+              )}
+            </div>
+          </div>
         ) : message.isStreaming && !message.content && !hasReasoningBlock ? (
           <div className="thinking-dots" aria-label="Thinking">
             <span />
@@ -388,7 +438,7 @@ export function MessageBubble({
           />
         ) : null}
 
-        {!message.isStreaming && message.content && !message.needsBackendSetup && (
+        {!message.isStreaming && message.content && !message.needsBackendSetup && !message.needsAuth && (
           <>
             {(hasWebSources || hasArchiveSources) && (
               <div className="inline-sources-strip">

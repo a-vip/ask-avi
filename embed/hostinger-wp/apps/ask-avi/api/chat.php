@@ -31,20 +31,32 @@ $mode = (string) ($body['mode'] ?? 'oss-reasoning');
 $temperature = isset($body['temperature']) ? (float) $body['temperature'] : 0.72;
 $temperature = max(0.0, min(1.3, $temperature));
 $systemInstruction = trim((string) ($body['systemInstruction'] ?? ''));
+if (function_exists('mb_substr')) {
+  $systemInstruction = mb_substr($systemInstruction, 0, 18000, 'UTF-8');
+} else {
+  $systemInstruction = substr($systemInstruction, 0, 18000);
+}
+
+function ask_avi_clip_text(string $text, int $limit): string {
+  if (function_exists('mb_substr')) {
+    return mb_substr($text, 0, $limit, 'UTF-8');
+  }
+  return substr($text, 0, $limit);
+}
 
 function ask_avi_to_openai_messages(array $contents, string $system): array {
   $msgs = [];
   if ($system !== '') {
     $msgs[] = ['role' => 'system', 'content' => $system];
   }
-  $tail = array_slice($contents, -24);
+  $tail = array_slice($contents, -18);
   foreach ($tail as $turn) {
     $role = (($turn['role'] ?? 'user') === 'model') ? 'assistant' : 'user';
     $parts = $turn['parts'] ?? [];
     $texts = [];
     foreach ($parts as $p) {
       if (isset($p['text']) && is_string($p['text'])) {
-        $texts[] = $p['text'];
+        $texts[] = ask_avi_clip_text($p['text'], 10000);
       }
     }
     $joined = trim(implode("\n", $texts));
@@ -148,6 +160,38 @@ function ask_avi_stream_upstream(
 }
 
 if ($mode === 'google') {
+  if (!$reqUser) {
+    $latencyMs = (int) round(microtime(true) * 1000) - $startedMs;
+    ask_avi_record_chat_telemetry(null, 401, 'gemini', $latencyMs, 'auth_required: Gemini models require a signed-in account');
+    ask_avi_send_json(401, [
+      'error' => 'auth_required',
+      'message' => 'Sign in or create a free account to use Gemini models.',
+    ]);
+  }
+
+  $isAdminReq = (($reqUser['role'] ?? '') === 'admin') || (function_exists('current_user_can') && current_user_can('manage_options'));
+  if (!$isAdminReq && isset($wpdb)) {
+    ask_avi_ensure_tables();
+    $logsTable = $wpdb->prefix . 'ask_avi_logs';
+    $dayAgoMs = (int) round(microtime(true) * 1000) - (24 * 60 * 60 * 1000);
+    $dailyGeminiCount = (int) $wpdb->get_var(
+      $wpdb->prepare(
+        "SELECT COUNT(*) FROM {$logsTable} WHERE ts >= %d AND type = 'chat_ok' AND user_email = %s AND model_used LIKE %s",
+        $dayAgoMs,
+        strtolower((string) $reqUser['email']),
+        'gemini%'
+      )
+    );
+    if ($dailyGeminiCount >= 40) {
+      $latencyMs = (int) round(microtime(true) * 1000) - $startedMs;
+      ask_avi_record_chat_telemetry($reqUser, 429, 'gemini', $latencyMs, 'Daily Gemini limit reached (40/24h)');
+      ask_avi_send_json(429, [
+        'error' => 'gemini_quota_exceeded',
+        'message' => 'Daily Gemini allowance reached (40 messages / 24h) — switch to Open-Source Reasoning (free) or try again tomorrow.',
+      ]);
+    }
+  }
+
   $geminiKey = trim((string) ($settings['gemini_api_key'] ?? ''));
   if ($geminiKey === '') {
     $latencyMs = (int) round(microtime(true) * 1000) - $startedMs;

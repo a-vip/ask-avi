@@ -5,9 +5,13 @@ import {
   ChevronDown,
   FileText,
   Globe,
+  Link2,
+  Loader2,
+  Lock,
   Mic,
   MicOff,
   Paperclip,
+  Presentation,
   Settings,
   Sparkles,
   Square,
@@ -16,6 +20,13 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { ENGINE_OPTIONS, VOICE_STYLES } from '../data/persona';
 import type { AttachedContext, EngineId, VoiceStyle } from '../types/chat';
+import {
+  allocateContextBudget,
+  extractFileContext,
+  fetchUrlContext,
+  MAX_CONTEXT_ITEMS,
+  SUPPORTED_FILE_ACCEPT,
+} from '../utils/contextExtractor';
 
 interface ComposerProps {
   value: string;
@@ -30,10 +41,16 @@ interface ComposerProps {
   onOpenSettings: () => void;
   voiceStyle: VoiceStyle;
   onChangeVoiceStyle: (style: VoiceStyle) => void;
-  attachedContext: AttachedContext | null;
-  onAttachContext: (ctx: AttachedContext | null) => void;
+  attachedContext?: AttachedContext | null;
+  onAttachContext?: (ctx: AttachedContext | null) => void;
+  attachedContexts?: AttachedContext[];
+  onAttachContexts?: (items: AttachedContext[]) => void;
   onOpenDossierPicker: () => void;
   isAdmin?: boolean;
+  isAuthenticated?: boolean;
+  onRequireSignIn?: (pendingEngineId?: EngineId) => void;
+  proxyUrl?: string;
+  sessionToken?: string;
   centered?: boolean;
   inputRef?: React.RefObject<HTMLTextAreaElement | null>;
 }
@@ -72,10 +89,16 @@ export function Composer({
   onOpenSettings,
   voiceStyle,
   onChangeVoiceStyle,
-  attachedContext,
+  attachedContext = null,
   onAttachContext,
+  attachedContexts,
+  onAttachContexts,
   onOpenDossierPicker,
   isAdmin = false,
+  isAuthenticated = false,
+  onRequireSignIn,
+  proxyUrl,
+  sessionToken,
   centered = false,
   inputRef: externalRef,
 }: ComposerProps) {
@@ -89,8 +112,31 @@ export function Composer({
   const [styleOpen, setStyleOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
+  const [linkMode, setLinkMode] = useState(false);
+  const [urlDraft, setUrlDraft] = useState('');
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [attachError, setAttachError] = useState('');
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+
+  const rawContexts: AttachedContext[] =
+    attachedContexts !== undefined
+      ? attachedContexts
+      : attachedContext
+        ? [attachedContext]
+        : [];
+  const budget = allocateContextBudget(rawContexts);
+  const items = budget.items;
+  const remainingSlots = Math.max(0, MAX_CONTEXT_ITEMS - items.length);
+
+  const commitContexts = (next: AttachedContext[]) => {
+    const allocated = allocateContextBudget(next).items;
+    if (onAttachContexts) {
+      onAttachContexts(allocated);
+    } else if (onAttachContext) {
+      onAttachContext(allocated[0] ?? null);
+    }
+  };
 
   const speechSupported =
     typeof window !== 'undefined' &&
@@ -133,16 +179,68 @@ export function Composer({
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const text = await file.text();
-    onAttachContext({
-      id: `file-${Date.now()}`,
-      title: file.name,
-      content: text.slice(0, 4000),
-    });
+    const files = Array.from(e.target.files ?? []);
     e.target.value = '';
-    setAttachOpen(false);
+    if (files.length === 0) return;
+
+    if (remainingSlots <= 0) {
+      setAttachError(`Up to ${MAX_CONTEXT_ITEMS} context items can be attached per message.`);
+      return;
+    }
+
+    setAttachError('');
+    setIsExtracting(true);
+    const chosen = files.slice(0, remainingSlots);
+    const added: AttachedContext[] = [];
+    const failures: string[] = [];
+
+    try {
+      for (const file of chosen) {
+        try {
+          const ctx = await extractFileContext(file);
+          added.push(ctx);
+        } catch (err) {
+          failures.push(err instanceof Error ? err.message : `Could not read "${file.name}".`);
+        }
+      }
+
+      if (added.length > 0) {
+        commitContexts([...items, ...added]);
+      }
+
+      if (files.length > chosen.length) {
+        failures.push(`Only the first ${chosen.length} file(s) fit the ${MAX_CONTEXT_ITEMS}-item cap.`);
+      }
+
+      if (failures.length > 0) {
+        setAttachError(failures[0]);
+      } else {
+        setAttachOpen(false);
+      }
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  const handleAddLink = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (remainingSlots <= 0) {
+      setAttachError(`Up to ${MAX_CONTEXT_ITEMS} context items can be attached per message.`);
+      return;
+    }
+    setAttachError('');
+    setIsExtracting(true);
+    try {
+      const ctx = await fetchUrlContext(urlDraft, sessionToken, proxyUrl);
+      commitContexts([...items, ctx]);
+      setUrlDraft('');
+      setLinkMode(false);
+      setAttachOpen(false);
+    } catch (err) {
+      setAttachError(err instanceof Error ? err.message : 'Unable to fetch web link.');
+    } finally {
+      setIsExtracting(false);
+    }
   };
 
   const toggleVoiceInput = () => {
@@ -184,20 +282,63 @@ export function Composer({
   return (
     <div className={`composer-wrap ${centered ? 'centered' : 'docked'}`}>
       <div className="composer-pill">
-        {attachedContext && (
+        {items.length > 0 && (
           <div className="attached-chip-row">
-            <div className="attached-chip">
-              <FileText size={13} />
-              <span className="attached-title">{attachedContext.title}</span>
-              <button
-                type="button"
-                className="attached-remove"
-                onClick={() => onAttachContext(null)}
-                aria-label="Remove attachment"
-              >
-                <X size={13} />
-              </button>
-            </div>
+            {items.map((ctx) => {
+              const kind = ctx.kind ?? 'text';
+              const KindIcon =
+                kind === 'link'
+                  ? Link2
+                  : kind === 'slides'
+                    ? Presentation
+                    : kind === 'dossier'
+                      ? BookOpen
+                      : FileText;
+              const badgeLabel =
+                kind === 'dossier'
+                  ? 'DOSSIER'
+                  : kind === 'slides'
+                    ? 'SLIDES'
+                    : kind === 'link'
+                      ? 'LINK'
+                      : kind === 'pdf'
+                        ? 'PDF'
+                        : kind === 'doc'
+                          ? 'DOC'
+                          : 'TEXT';
+              return (
+                <div
+                  key={ctx.id}
+                  className="attached-chip"
+                  title={
+                    ctx.sourceUrl
+                      ? `${ctx.title} (${ctx.sourceUrl})`
+                      : ctx.trimmed
+                        ? `${ctx.title} · compacted to preserve token budget`
+                        : ctx.title
+                  }
+                >
+                  <KindIcon size={13} />
+                  <span className="attached-kind-tag">{badgeLabel}</span>
+                  <span className="attached-title">{ctx.title}</span>
+                  <button
+                    type="button"
+                    className="attached-remove"
+                    onClick={() => commitContexts(items.filter((x) => x.id !== ctx.id))}
+                    aria-label={`Remove attachment ${ctx.title}`}
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              );
+            })}
+            <span
+              className="attached-budget-pill"
+              title="Automatically compacted to keep token usage and API quotas healthy (max 4 items, ~2,000 tokens combined)"
+            >
+              {items.length}/{MAX_CONTEXT_ITEMS} · ~{budget.estimatedTokens} tok
+              {budget.trimmedAny ? ' · compacted' : ''}
+            </span>
           </div>
         )}
 
@@ -217,23 +358,34 @@ export function Composer({
             <div className="popover-anchor" ref={attachMenuRef}>
               <button
                 type="button"
-                className="tool-chip-btn"
+                className={`tool-chip-btn ${items.length > 0 ? 'has-items' : ''}`}
                 onClick={() => {
                   setStyleOpen(false);
                   setModelOpen(false);
+                  setAttachError('');
+                  setLinkMode(false);
                   setAttachOpen((p) => !p);
                 }}
-                title="Attach dossier or text file"
+                title="Attach dossiers, PDFs, docs, slides, text files, or web links"
               >
                 <Paperclip size={15} />
-                <span className="hide-xs">Context</span>
+                <span className="hide-xs">
+                  Context{items.length > 0 ? ` · ${items.length}` : ''}
+                </span>
               </button>
 
               {attachOpen && (
-                <div className="composer-popover">
+                <div className="composer-popover composer-popover-context">
+                  <div className="popover-context-meta">
+                    <span>
+                      Attach context ({items.length}/{MAX_CONTEXT_ITEMS})
+                    </span>
+                    <span className="popover-budget-hint">Auto-compacted ≤2k tok</span>
+                  </div>
                   <button
                     type="button"
                     className="popover-item"
+                    disabled={remainingSlots <= 0 || isExtracting}
                     onClick={() => {
                       setAttachOpen(false);
                       onOpenDossierPicker();
@@ -245,17 +397,67 @@ export function Composer({
                   <button
                     type="button"
                     className="popover-item"
+                    disabled={remainingSlots <= 0 || isExtracting}
                     onClick={() => fileInputRef.current?.click()}
                   >
-                    <FileText size={14} />
-                    <strong>Upload .txt or .md</strong>
+                    {isExtracting ? <Loader2 size={14} className="spin" /> : <FileText size={14} />}
+                    <strong>Upload PDF, Docs, Slides, Text…</strong>
                   </button>
+                  {!linkMode ? (
+                    <button
+                      type="button"
+                      className="popover-item"
+                      disabled={remainingSlots <= 0 || isExtracting}
+                      onClick={() => {
+                        setAttachError('');
+                        setLinkMode(true);
+                      }}
+                    >
+                      <Link2 size={14} />
+                      <strong>Add web link (URL)</strong>
+                    </button>
+                  ) : (
+                    <form className="popover-link-form" onSubmit={handleAddLink}>
+                      <input
+                        type="url"
+                        className="popover-link-input"
+                        value={urlDraft}
+                        onChange={(e) => setUrlDraft(e.target.value)}
+                        placeholder="https://example.com/article"
+                        aria-label="Web link URL"
+                        autoFocus
+                        disabled={isExtracting}
+                      />
+                      <div className="popover-link-actions">
+                        <button
+                          type="button"
+                          className="popover-link-cancel"
+                          onClick={() => {
+                            setLinkMode(false);
+                            setAttachError('');
+                          }}
+                          disabled={isExtracting}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          className="popover-link-submit"
+                          disabled={isExtracting || !urlDraft.trim()}
+                        >
+                          {isExtracting ? 'Fetching…' : 'Attach'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                  {attachError && <p className="popover-context-error">{attachError}</p>}
                 </div>
               )}
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".txt,.md,.json,.csv"
+                multiple
+                accept={SUPPORTED_FILE_ACCEPT}
                 onChange={handleFileChange}
                 hidden
               />
@@ -337,14 +539,21 @@ export function Composer({
 
                   {ENGINE_OPTIONS.filter((opt) => isAdmin || opt.id !== 'custom-api').map((opt) => {
                     const selected = opt.id === engineId;
+                    const locked = Boolean(opt.requiresAuth && !isAuthenticated);
                     return (
                       <button
                         key={opt.id}
                         type="button"
                         role="option"
                         aria-selected={selected}
-                        className={`model-option ${selected ? 'selected' : ''}`}
+                        aria-disabled={locked || undefined}
+                        className={`model-option ${selected ? 'selected' : ''} ${locked ? 'locked' : ''}`}
                         onClick={() => {
+                          if (locked) {
+                            setModelOpen(false);
+                            onRequireSignIn?.(opt.id);
+                            return;
+                          }
                           onSelectEngine(opt.id);
                           setModelOpen(false);
                           if (opt.id === 'custom-api' && isAdmin) {
@@ -354,15 +563,23 @@ export function Composer({
                       >
                         <div className="model-option-top">
                           <div className="model-option-title">
-                            <Sparkles size={14} />
+                            {locked ? <Lock size={14} className="lock-icon" /> : <Sparkles size={14} />}
                             <span>{opt.name}</span>
                           </div>
                           <div className="model-option-badges">
-                            <span className="size-badge">{opt.badge}</span>
-                            {selected && <Check size={14} className="check-icon" />}
+                            {locked ? (
+                              <span className="size-badge size-badge-auth">Sign in</span>
+                            ) : (
+                              <span className="size-badge">{opt.badge}</span>
+                            )}
+                            {selected && !locked && <Check size={14} className="check-icon" />}
                           </div>
                         </div>
-                        <p className="model-option-desc">{opt.description}</p>
+                        <p className="model-option-desc">
+                          {locked
+                            ? `${opt.description} Sign in or create a free account to unlock.`
+                            : opt.description}
+                        </p>
                       </button>
                     );
                   })}

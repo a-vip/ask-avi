@@ -33,6 +33,7 @@ interface SignInModalProps {
   currentProfile: UserProfile | null;
   authConfig?: AuthConfigResponse | null;
   proxyUrl?: string;
+  pendingNotice?: string;
   onClose: () => void;
   onSignIn: (profile: UserProfile) => void;
   onSignOut: () => void;
@@ -43,6 +44,7 @@ export function SignInModal({
   currentProfile,
   authConfig = null,
   proxyUrl,
+  pendingNotice = '',
   onClose,
   onSignIn,
   onSignOut,
@@ -314,6 +316,13 @@ export function SignInModal({
             </div>
           ) : (
             <>
+              {pendingNotice && (
+                <div className="auth-pending-notice" role="status">
+                  <Lock size={14} />
+                  <span>{pendingNotice}</span>
+                </div>
+              )}
+
               <div className="auth-mode-tabs" role="tablist">
                 <button
                   type="button"

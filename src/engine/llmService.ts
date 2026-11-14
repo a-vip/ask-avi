@@ -8,6 +8,7 @@ import type {
   VoiceStyle,
   WebSource,
 } from '../types/chat';
+import { formatContextsForPrompt } from '../utils/contextExtractor';
 import { splitThinkingAndAnswer } from '../utils/thinking';
 import {
   extractGeminiChunkDelta,
@@ -23,6 +24,23 @@ export class BackendNotConfiguredError extends Error {
     super(message);
     this.name = 'BackendNotConfiguredError';
   }
+}
+
+export class AuthRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuthRequiredError';
+  }
+}
+
+function resolveAttachedPromptBlock(params: StreamGenerateParams): string {
+  const list =
+    params.attachedContexts && params.attachedContexts.length > 0
+      ? params.attachedContexts
+      : params.attachedContext
+        ? [params.attachedContext]
+        : [];
+  return formatContextsForPrompt(list);
 }
 
 const keysWithoutNativeSearch = new Set<string>();
@@ -101,6 +119,7 @@ export interface StreamGenerateParams {
   proxyUrl?: string;
   sessionToken?: string;
   attachedContext?: AttachedContext;
+  attachedContexts?: AttachedContext[];
   customApi?: CustomApiConfig;
   signal?: AbortSignal;
   onUpdate: (update: StreamProgressPayload) => void;
@@ -260,7 +279,7 @@ class AviLLMService {
     const systemInstruction = buildAviSystemPrompt(
       params.voiceStyle,
       sources,
-      params.attachedContext?.content,
+      resolveAttachedPromptBlock(params),
       false,
       liveWebContext
     );
@@ -482,7 +501,7 @@ class AviLLMService {
       buildAviSystemPrompt(
         params.voiceStyle,
         sources,
-        params.attachedContext?.content,
+        resolveAttachedPromptBlock(params),
         false,
         liveWebContext
       );
@@ -602,6 +621,11 @@ class AviLLMService {
     }
 
     if (!response || !response.ok || !response.body) {
+      if (lastStatus === 401 || lastErrBody.includes('auth_required')) {
+        throw new AuthRequiredError(
+          'Sign in or create a free account to unlock Google Gemini models. Free open-source models remain open to everyone.'
+        );
+      }
       if (
         lastStatus === 503 &&
         (lastErrBody.includes('proxy_unconfigured') || lastErrBody.includes('GEMINI_API_KEY'))
@@ -645,7 +669,7 @@ class AviLLMService {
     const systemPrompt = buildAviSystemPrompt(
       params.voiceStyle,
       sources,
-      params.attachedContext?.content,
+      resolveAttachedPromptBlock(params),
       true
     );
     const messages = [

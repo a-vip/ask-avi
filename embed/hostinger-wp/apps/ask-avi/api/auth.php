@@ -20,10 +20,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 $reqUser = ask_avi_resolve_request_user();
 
-function ask_avi_insert_user_row(string $table, array $row): void {
+function ask_avi_insert_user_row(string $table, array $row): bool {
   global $wpdb;
   $clean = array_filter($row, static fn($v) => $v !== null);
-  $wpdb->insert($table, $clean);
+  $ok = $wpdb->insert($table, $clean);
+  return $ok !== false;
 }
 
 function ask_avi_sync_wp_lead(string $email): void {
@@ -180,7 +181,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
           'chat_count' => 0,
           'error_count' => 0,
         ];
-        ask_avi_insert_user_row($users_table, $row);
+        if (!ask_avi_insert_user_row($users_table, $row)) {
+      ask_avi_send_json(500, ['ok' => false, 'error' => 'Could not persist account in database: ' . ($wpdb->last_error ?: 'unknown error')]);
+    }
         $existing = $row;
       } else {
         $wpdb->update($users_table, [
@@ -375,7 +378,9 @@ if ($action === 'signup' || $action === 'signin') {
       'chat_count' => 0,
       'error_count' => 0,
     ];
-    ask_avi_insert_user_row($users_table, $row);
+    if (!ask_avi_insert_user_row($users_table, $row)) {
+      ask_avi_send_json(500, ['ok' => false, 'error' => 'Could not persist account in database: ' . ($wpdb->last_error ?: 'unknown error')]);
+    }
     if (!empty($optIn)) {
       ask_avi_sync_wp_lead($email);
     }
@@ -408,7 +413,9 @@ if ($action === 'signup' || $action === 'signin') {
         'chat_count' => 0,
         'error_count' => 0,
       ];
-      ask_avi_insert_user_row($users_table, $row);
+      if (!ask_avi_insert_user_row($users_table, $row)) {
+      ask_avi_send_json(500, ['ok' => false, 'error' => 'Could not persist account in database: ' . ($wpdb->last_error ?: 'unknown error')]);
+    }
       ask_avi_record_log([
         'type' => 'auth_signup',
         'level' => 'info',

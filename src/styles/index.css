@@ -713,6 +713,27 @@ a {
   opacity: 0.72;
 }
 
+.model-option.locked {
+  opacity: 0.86;
+  border-color: color-mix(in srgb, var(--border) 75%, transparent);
+}
+
+.model-option.locked:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.lock-icon {
+  color: var(--text-3);
+}
+
+.size-badge-auth {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .model-option-top {
   display: flex;
   align-items: center;
@@ -1108,6 +1129,7 @@ a {
 .attached-chip-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   margin-bottom: 8px;
 }
@@ -1122,6 +1144,27 @@ a {
   color: var(--accent);
   font-size: 0.76rem;
   max-width: 100%;
+}
+
+.attached-kind-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.attached-budget-pill {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.67rem;
+  color: var(--text-3);
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  margin-left: auto;
 }
 
 .attached-title {
@@ -1194,6 +1237,11 @@ a {
   color: var(--text);
 }
 
+.tool-chip-btn.has-items {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+}
+
 .composer-popover {
   position: absolute;
   bottom: calc(100% + 10px);
@@ -1205,6 +1253,111 @@ a {
   box-shadow: var(--shadow-lg);
   padding: 6px;
   z-index: 65;
+}
+
+.composer-popover-context {
+  width: 286px;
+  padding: 8px;
+}
+
+.popover-context-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px 6px;
+  font-size: 0.7rem;
+  color: var(--text-3);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+.popover-budget-hint {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.64rem;
+  color: var(--text-3);
+}
+
+.popover-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.popover-link-form {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 8px 6px 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+
+.popover-link-input {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 0.8rem;
+  outline: none;
+}
+
+.popover-link-input:focus {
+  border-color: var(--accent);
+}
+
+.popover-link-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.popover-link-cancel,
+.popover-link-submit {
+  font-size: 0.76rem;
+  font-weight: 500;
+  border-radius: 7px;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+
+.popover-link-cancel {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+}
+
+.popover-link-submit {
+  border: none;
+  background: var(--accent);
+  color: #07131d;
+}
+
+.popover-link-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.popover-context-error {
+  margin: 6px 4px 2px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .popover-title {
@@ -1353,6 +1506,14 @@ a {
   gap: 6px;
 }
 
+.msg-user-attachments-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  max-width: 100%;
+}
+
 .msg-user-attachment {
   display: inline-flex;
   align-items: center;
@@ -1362,6 +1523,13 @@ a {
   border-radius: 7px;
   background: var(--accent-soft);
   color: var(--accent);
+  max-width: 260px;
+}
+
+.msg-user-attachment span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .msg-user-bubble-wrap {
@@ -3203,6 +3371,25 @@ a {
   font-size: 0.79rem;
   line-height: 1.45;
   color: var(--text-3);
+}
+
+.auth-pending-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.auth-pending-notice svg {
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
 .auth-form {

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { strToU8, zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { buildAviSystemPrompt, ENGINE_OPTIONS } from '../src/data/persona';
 import {
@@ -15,6 +16,14 @@ import {
   isVerifiedAdmin,
   resolveEffectiveAuthUrl,
 } from '../src/utils/authClient';
+import {
+  allocateContextBudget,
+  compactContextText,
+  extractFileContext,
+  formatContextsForPrompt,
+  MAX_CONTEXT_ITEMS,
+  MAX_TOTAL_CONTEXT_CHARS,
+} from '../src/utils/contextExtractor';
 import { renderMarkdownToSafeHtml } from '../src/utils/markdown';
 import { splitThinkingAndAnswer } from '../src/utils/thinking';
 import {
@@ -317,5 +326,104 @@ describe('Thread Storage & Export Helpers', () => {
     ]);
     expect(csv).toContain("'=CMD()");
     expect(csv).toContain('user@example.com,google,user,Yes');
+  });
+
+  it('requires authentication for Gemini engines while keeping open-source engines public', () => {
+    const ossR = ENGINE_OPTIONS.find((e) => e.id === 'oss-reasoning');
+    const ossF = ENGINE_OPTIONS.find((e) => e.id === 'oss-fast');
+    const gFlash = ENGINE_OPTIONS.find((e) => e.id === 'gemini-flash');
+    const gPro = ENGINE_OPTIONS.find((e) => e.id === 'gemini-pro');
+
+    expect(ossR?.requiresAuth).toBeFalsy();
+    expect(ossF?.requiresAuth).toBeFalsy();
+    expect(gFlash?.requiresAuth).toBe(true);
+    expect(gPro?.requiresAuth).toBe(true);
+  });
+
+  it('caps multi-context token budgets fairly and embeds without double-prefixing', () => {
+    const huge1 = 'A '.repeat(3000);
+    const huge2 = 'B '.repeat(3000);
+    const huge3 = 'C '.repeat(3000);
+    const small = 'Concise note on Meaningful Human Control.';
+    const extra5 = 'Should be dropped beyond MAX_CONTEXT_ITEMS.';
+
+    const result = allocateContextBudget([
+      { id: '1', title: 'Doc 1', content: huge1, kind: 'pdf' },
+      { id: '2', title: 'Doc 2', content: huge2, kind: 'doc' },
+      { id: '3', title: 'Doc 3', content: small, kind: 'link' },
+      { id: '4', title: 'Doc 4', content: huge3, kind: 'slides' },
+      { id: '5', title: 'Doc 5', content: extra5, kind: 'text' },
+    ]);
+
+    expect(result.items.length).toBe(MAX_CONTEXT_ITEMS);
+    expect(result.totalChars).toBeLessThanOrEqual(MAX_TOTAL_CONTEXT_CHARS);
+    expect(result.items.find((i) => i.id === '3')?.content).toBe(small);
+    expect(result.items.find((i) => i.id === '3')?.trimmed).toBe(false);
+    expect(result.trimmedAny).toBe(true);
+
+    const compacted = compactContextText('hello   world\n\n\n\nfoo', 100);
+    expect(compacted.text).toBe('hello world\n\nfoo');
+
+    const promptBlock = formatContextsForPrompt(result.items);
+    const sysPrompt = buildAviSystemPrompt('standard', [], promptBlock);
+    expect(sysPrompt).toContain('[Context 3 · LINK: Doc 3]');
+    expect(sysPrompt).toContain(small);
+    expect(sysPrompt).not.toContain('USER-ATTACHED DOCUMENT');
+  });
+
+  it('extracts text cleanly from .docx, .pptx, and .xlsx fixtures', async () => {
+    const makeZipFile = (entries: Record<string, string>, name: string) => {
+      const zipped = zipSync(
+        Object.fromEntries(Object.entries(entries).map(([k, v]) => [k, strToU8(v)]))
+      );
+      const ab = zipped.buffer.slice(zipped.byteOffset, zipped.byteOffset + zipped.byteLength);
+      return {
+        name,
+        size: zipped.byteLength,
+        arrayBuffer: async () => ab,
+        text: async () => '',
+      } as unknown as File;
+    };
+
+    const docx = await extractFileContext(
+      makeZipFile(
+        {
+          'word/document.xml':
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Article 36 review brief</w:t></w:r></w:p></w:body></w:document>',
+        },
+        'brief.docx'
+      )
+    );
+    expect(docx.kind).toBe('doc');
+    expect(docx.content).toContain('Article 36 review brief');
+
+    const pptx = await extractFileContext(
+      makeZipFile(
+        {
+          'ppt/slides/slide1.xml':
+            '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:t>Opening Thesis</a:t></p:sld>',
+          'ppt/slides/slide2.xml':
+            '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:t>Governance Architecture</a:t></p:sld>',
+        },
+        'deck.pptx'
+      )
+    );
+    expect(pptx.kind).toBe('slides');
+    expect(pptx.content).toContain('[Slide 1] Opening Thesis');
+    expect(pptx.content).toContain('[Slide 2] Governance Architecture');
+
+    const xlsx = await extractFileContext(
+      makeZipFile(
+        {
+          'xl/sharedStrings.xml': '<sst><si><t>Treaty</t></si><si><t>Binding</t></si></sst>',
+          'xl/worksheets/sheet1.xml':
+            '<worksheet><sheetData><row><c t="s"><v>0</v></c><c t="s"><v>1</v></c></row></sheetData></worksheet>',
+        },
+        'matrix.xlsx'
+      )
+    );
+    expect(xlsx.kind).toBe('doc');
+    expect(xlsx.content).toContain('Treaty');
+    expect(xlsx.content).toContain('Binding');
   });
 });

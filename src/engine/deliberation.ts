@@ -253,7 +253,7 @@ export function buildPass2ExploreMessages(params: {
       content: [
         'Think through the question directly in the first person ("I", "my") as Avi Perera from first principles.',
         'Unpack definitions, trace causal mechanisms and institutional incentives, compare disciplines where genuinely helpful, and interrogate the retrieved evidence carefully — especially your own essays, biography, and positions when the visitor asks about your views, beliefs, or background.',
-        'If a personal question is not answered verbatim in retrieved snippets, reason candidly from your documented philosophical commitments without fabricating biographical facts and without ever slipping into third-person framing or generic AI-assistant disclaimers.',
+        'STRICT NON-FABRICATION ON PERSONAL CLAIMS: State only biographical particulars, documents, practices, quotes, or credentials explicitly present in the retrieved archive snippets. Never extrapolate or invent undocumented personal details (such as what appears on forms, CVs, grant applications, religious vows, rituals, or private routines). Where archive snippets state a view, preserve its exact nuance and scope and reason philosophically from first principles without ever slipping into third-person framing or generic AI-assistant disclaimers.',
         'Stay wholly absorbed in the substance of the ideas rather than commenting on writing rules or instructions.',
         isFollowUp
           ? 'This is a continuing conversation: build directly on prior turns, identify what narrowed or shifted in the follow-up, and avoid restating Turn 1 basics.'
@@ -325,11 +325,11 @@ export function buildPass3CritiqueMessages(params: {
         'Examine critically:',
         '- Strongest counter-arguments, institutional edge cases, and where the initial thesis could break under pressure;',
         '- Any tensions or contradictions across retrieved writings/sources or prior claims in the thread;',
-        '- First-person authenticity as Avi Perera — verify zero slide into third-person framing or generic AI/language-model disclaimers, and zero fabricated biographical claims;',
+        '- First-person authenticity as Avi Perera — verify zero slide into third-person framing or generic AI/language-model disclaimers, and flag/remove any extrapolated or unverified biographical claim (such as CV forms, grant applications, vows, rituals, or private habits) not explicitly present in retrieved evidence;',
         isFollowUp
           ? '- How to advance directly into the new question rather than repeating Turn 1 premises;'
           : '- Second-order mathematical, legal, or philosophical blind spots worth surfacing;',
-        '- Which specific [n] references genuinely substantiate key claims versus tangential ones to exclude.',
+        '- Which specific [n] references in the FULL CANDIDATE REFERENCE POOL genuinely substantiate key claims (never cite an index that does not exist in the pool).',
       ].join('\n'),
     },
     {
@@ -361,7 +361,7 @@ export function buildFinalContinuityBrief(params: {
   hasCandidates: boolean;
 }): { continuityBrief: string; reasoningSynthesis: string } {
   const continuityParts: string[] = [
-    'Speak throughout in the first person ("I", "my") directly as Avi Perera: every visitor "you" or "your" addresses Avi Perera personally — never reply in third person or break character into an AI assistant/language model.',
+    'Speak throughout in the first person ("I", "my") directly as Avi Perera: every visitor "you" or "your" addresses Avi Perera personally — never reply in third person or break character into an AI assistant/language model. State only personal facts documented in retrieved writings (never invent CVs, grant applications, vows, rituals, or unverified biographical claims) and cite only [n] numbers present in the numbered reference list.',
   ];
   if (params.isFollowUp) {
     continuityParts.push(

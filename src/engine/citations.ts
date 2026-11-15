@@ -141,10 +141,11 @@ function transformProseSegments(
     .join('');
 }
 
-const CITE_GROUP_RE = /\[(\d{1,2}(?:\s*,\s*\d{1,2})*)\](?!\()/g;
+const CITE_GROUP_RE = /\[(\d{1,2}(?:\s*,\s*\d{1,2})*)\](?!\(|\[|:)/g;
 
 /**
  * Parses `[n]` (and comma groups like `[1, 3]`) actually cited in the final answer,
+ * strips out-of-range/hallucinated citation markers not present in candidates,
  * excludes uncited exploratory research sources from the rendered footer,
  * and re-indexes remaining sources sequentially `[1]`, `[2]`, ... 1:1 with prose pills.
  */
@@ -163,17 +164,22 @@ export function alignCitedSources(
   }
 
   // First normalize valid numeric groups [1, 3] -> [1] [3] while scanning cited indices in appearance order
+  // and removing hallucinated out-of-range markers like [2] when only [1] was provided.
   const citedOrder: number[] = [];
   const seenTempIds = new Set<number>();
 
-  const normalizedMarkdown = transformProseSegments(answerMarkdown, (prose) =>
-    prose.replace(CITE_GROUP_RE, (fullMatch, groupStr: string) => {
+  const normalizedMarkdown = transformProseSegments(answerMarkdown, (prose) => {
+    let strippedInvalid = false;
+    const replaced = prose.replace(CITE_GROUP_RE, (_fullMatch, groupStr: string) => {
       const nums = groupStr
         .split(',')
         .map((s) => Number(s.trim()))
         .filter((n) => Number.isInteger(n) && candidateByTempId.has(n));
 
-      if (nums.length === 0) return fullMatch;
+      if (nums.length === 0) {
+        strippedInvalid = true;
+        return '';
+      }
 
       for (const n of nums) {
         if (!seenTempIds.has(n)) {
@@ -182,8 +188,12 @@ export function alignCitedSources(
         }
       }
       return nums.map((n) => `[${n}]`).join(' ');
-    })
-  );
+    });
+    if (!strippedInvalid) return replaced;
+    return replaced
+      .replace(/[ \t\u00A0\u202F]+([.,;:!?])/g, '$1')
+      .replace(/[ \t]{2,}/g, ' ');
+  });
 
   // Assign sequential final indices 1..K to strictly cited candidates
   const remap = new Map<number, number>();

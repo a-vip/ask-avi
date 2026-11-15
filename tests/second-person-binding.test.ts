@@ -6,7 +6,13 @@ import {
   buildFinalContinuityBrief,
 } from '../src/engine/deliberation';
 import { knowledgeIndex } from '../src/engine/rag';
-import { buildAviSystemPrompt } from '../src/data/persona';
+import {
+  buildAviSystemPrompt,
+} from '../src/data/persona';
+import {
+  alignCitedSources,
+  mergeCandidateSources,
+} from '../src/engine/citations';
 import {
   assembleServerSystemPrompt,
   DEFAULT_SERVER_MASTER_PROMPT,
@@ -88,5 +94,41 @@ describe('Second-person ("you"/"your") binding to Avi Perera', () => {
 
     const studyHits = knowledgeIndex.search('where did you study?', { topK: 4 });
     expect(studyHits.sources.map((s) => s.entry.id)).toContain('pillar-bio-identity');
+  });
+
+  it('strips out-of-range hallucinated [n] citation pills while keeping valid ones and code literals intact', () => {
+    const candidates = mergeCandidateSources(
+      [
+        {
+          index: 1,
+          score: 12,
+          snippet: 'Frame of reference leans slightly Buddhist.',
+          matchedTerms: ['buddhist'],
+          entry: {
+            id: 'doc-astrology-is-prejudice',
+            title: 'Why Astrology Is a Form of Prejudice',
+            category: 'Essays & Philosophy',
+            date: '2026-10-01',
+            url: 'https://aviperera.com/astrology-is-prejudice/',
+            doi: '',
+            keywords: ['astrology', 'buddhist'],
+            summary: 'Evidence over belief systems.',
+            chunks: [],
+          },
+        },
+      ],
+      []
+    );
+
+    const aligned = alignCitedSources(
+      'My frame of reference leans slightly Buddhist [1], never formal dogma\u202F[2]. See also `items[2]` and [link](https://example.com).',
+      candidates
+    );
+
+    expect(aligned.sources).toHaveLength(1);
+    expect(aligned.content).toContain('[1], never formal dogma.');
+    expect(aligned.content).not.toContain('dogma\u202F[2]');
+    expect(aligned.content).toContain('`items[2]`');
+    expect(aligned.content).toContain('[link](https://example.com)');
   });
 });

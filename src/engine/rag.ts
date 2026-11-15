@@ -30,6 +30,9 @@ const QUERY_EXPANSIONS: Array<[RegExp, string[]]> = [
   [/\bsovdash\b|\bosint\b|\bglobe\b/i, ['sovereign', 'intelligence', 'dashboard', 'intel']],
   [/\blex machina\b|\bmcp\b|\beu ai act\b|\bgdpr\b/i, ['lex', 'machina', 'regulation', 'compliance', 'corpus']],
   [/\bnomad\b|\bbali\b|\btulum\b/i, ['colonisers', 'digital', 'nomad', 'thailand']],
+  [/\breligio\w*|\bfaith\b|\bbeliefs?\b|\bspiritu\w*|\btheolog\w*|\bchurch\b|\bgod\b|\batheis\w*|\bagnostic\w*|\bbuddhis\w*/i, ['buddhist', 'buddhism', 'christian', 'atheism', 'belief', 'philosophy', 'evidence', 'encyclical']],
+  [/\bwhere do you live\b|\bwhere are you based\b|\bthailand\b|\bbangkok\b|\blondon\b/i, ['bangkok', 'thailand', 'london', 'harrow', 'biography', 'nomad']],
+  [/\bstudied\b|\bstudy\b|\bdegree\b|\beducation\b|\buniversity\b|\bqualifications?\b/i, ['cambridge', 'buckingham', 'imperial', 'essex', 'open', 'scholarship', 'biography']],
 ];
 
 interface IndexedDoc {

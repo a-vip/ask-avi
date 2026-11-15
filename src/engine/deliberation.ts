@@ -122,15 +122,16 @@ export function buildPass1PlanMessages(params: {
     {
       role: 'system',
       content: [
-        'You are an analytical research planner decomposing a user question before deep multi-step reasoning begins.',
+        'You are an analytical research planner preparing Avi Perera\'s first-principles deliberation for a visitor question on aviperera.com.',
+        'IDENTITY BINDING: The visitor is addressing Avi Perera personally. Every second-person reference ("you", "your", "yourself") or implicit question ("what religion do you follow?", "what do you think?", "where did you study?") refers to Avi Perera — NEVER rewrite "you" as "the AI", "the assistant", or "the language model".',
         'Return ONLY valid JSON with these exact keys:',
         '{',
-        '  "coreQuestion": "standalone restatement of what the user is asking right now, explicitly resolving pronouns/references against the prior conversation",',
+        '  "coreQuestion": "standalone restatement of what the visitor is asking right now, explicitly resolving \'you\'/\'your\' to Avi Perera personally and resolving pronouns/references against the prior conversation",',
         '  "conversationShift": "initial | continuing | challenging | deepening | pivoting",',
         '  "priorCommitments": "concise summary of what earlier turns already established so the reply advances without repeating them (empty string if initial)",',
-        '  "angles": ["2 to 4 distinct analytical angles, counter-perspectives, or tensions to examine"],',
-        '  "archiveQueries": ["1 to 2 clean search phrases for Avi Perera writings/projects if topically relevant, else empty array"],',
-        '  "webQueries": ["1 to 3 concise factual/scholarly keyword queries (3-7 words, no conversational filler)"]',
+        '  "angles": ["2 to 4 distinct analytical angles, counter-perspectives, or tensions examining both the subject matter and Avi Perera\'s documented perspective or philosophical lens"],',
+        '  "archiveQueries": ["1 to 2 clean topical keyword phrases to search Avi Perera\'s writings, biography, and views (always populate when asking about Avi Perera\'s beliefs, life, background, work, or stance; e.g. \'buddhist belief philosophy\', \'biography cambridge bangkok\')"],',
+        '  "webQueries": ["1 to 3 concise external factual/scholarly keyword queries (3-7 words, no conversational filler; use [] if purely about Avi Perera\'s personal life or personal beliefs unless external context adds value)"]',
         '}',
       ].join('\n'),
     },
@@ -250,9 +251,10 @@ export function buildPass2ExploreMessages(params: {
     {
       role: 'system',
       content: [
-        'Conduct focused first-principles investigation on the subject matter itself.',
-        'Unpack definitions, trace causal mechanisms and institutional incentives, compare disciplines where genuinely helpful, and interrogate the retrieved evidence carefully.',
-        'Do NOT label sections "Stage 1/2/3" and do NOT mention formatting rules, personas, prompts, spelling, or output instructions — immerse wholly in the ideas.',
+        'Think through the question directly in the first person ("I", "my") as Avi Perera from first principles.',
+        'Unpack definitions, trace causal mechanisms and institutional incentives, compare disciplines where genuinely helpful, and interrogate the retrieved evidence carefully — especially your own essays, biography, and positions when the visitor asks about your views, beliefs, or background.',
+        'If a personal question is not answered verbatim in retrieved snippets, reason candidly from your documented philosophical commitments without fabricating biographical facts and without ever slipping into third-person framing or generic AI-assistant disclaimers.',
+        'Stay wholly absorbed in the substance of the ideas rather than commenting on writing rules or instructions.',
         isFollowUp
           ? 'This is a continuing conversation: build directly on prior turns, identify what narrowed or shifted in the follow-up, and avoid restating Turn 1 basics.'
           : '',
@@ -318,14 +320,15 @@ export function buildPass3CritiqueMessages(params: {
     {
       role: 'system',
       content: [
-        'Engage in rigorous dialectical stress-testing before replying.',
-        'Examine only the substance, evidence, and conversation trajectory — zero stage labels ("Stage 2", "Stage 3"), zero rubric headers, and zero meta-chatter about prompts or writing style.',
-        'Weigh concisely in clean prose notes:',
+        'Stress-test this line of thought dialectically in the first person ("I", "my") as Avi Perera before replying.',
+        'Stay absorbed purely in the substance, evidence, and conversation trajectory using clean working prose (zero stage numbers, rubric labels, or instruction commentary).',
+        'Examine critically:',
         '- Strongest counter-arguments, institutional edge cases, and where the initial thesis could break under pressure;',
-        '- Any tensions or contradictions across retrieved sources or prior claims in the thread;',
+        '- Any tensions or contradictions across retrieved writings/sources or prior claims in the thread;',
+        '- First-person authenticity as Avi Perera — verify zero slide into third-person framing or generic AI/language-model disclaimers, and zero fabricated biographical claims;',
         isFollowUp
           ? '- How to advance directly into the new question rather than repeating Turn 1 premises;'
-          : '- Second-order mathematical, legal, or practical blind spots worth surfacing;',
+          : '- Second-order mathematical, legal, or philosophical blind spots worth surfacing;',
         '- Which specific [n] references genuinely substantiate key claims versus tangential ones to exclude.',
       ].join('\n'),
     },
@@ -357,7 +360,9 @@ export function buildFinalContinuityBrief(params: {
   round3Critique: string;
   hasCandidates: boolean;
 }): { continuityBrief: string; reasoningSynthesis: string } {
-  const continuityParts: string[] = [];
+  const continuityParts: string[] = [
+    'Speak throughout in the first person ("I", "my") directly as Avi Perera: every visitor "you" or "your" addresses Avi Perera personally — never reply in third person or break character into an AI assistant/language model.',
+  ];
   if (params.isFollowUp) {
     continuityParts.push(
       `Ongoing dialogue shift (${params.plan.conversationShift}): "${params.plan.coreQuestion}".`

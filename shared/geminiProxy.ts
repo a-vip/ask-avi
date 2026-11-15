@@ -41,19 +41,21 @@ const GEMINI_FALLBACK_ORDER = [
   'gemini-flash-lite-latest',
 ];
 
-const GROQ_REASONING_MODELS = ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b'];
-const GROQ_FAST_MODELS = ['qwen/qwen3.8-27b', 'openai/gpt-oss-20b', 'openai/gpt-oss-120b'];
+const GROQ_REASONING_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
+const GROQ_FAST_MODELS = ['openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-120b'];
 
 const OPENROUTER_REASONING_MODELS = [
   'nvidia/nemotron-3-ultra-550b-a55b:free',
-  'openrouter/free',
-  'google/gemma-4-31b-it:free',
   'nvidia/nemotron-3.5-super-vl:free',
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+  'cohere/north-mini-code:free',
+  'nvidia/nemotron-3.5-lightning:free',
 ];
 const OPENROUTER_FAST_MODELS = [
   'nvidia/nemotron-3.5-lightning:free',
-  'openrouter/free',
-  'google/gemma-4-26b-a4b-it:free',
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+  'baidu/ernie-5.5-flash-preview:free',
+  'nvidia/nemotron-3.5-super-vl:free',
 ];
 
 const CF_AI_REASONING_MODELS = [
@@ -195,7 +197,9 @@ async function tryOpenAICompatibleUpstream(params: {
     if (params.provider === 'groq' && model.startsWith('openai/gpt-oss')) {
       payload.reasoning_format = 'parsed';
       payload.reasoning_effort = effort;
-    } else if (params.provider === 'openrouter' && params.reasoningEffort !== false) {
+    } else if (params.provider === 'groq' && model.startsWith('qwen/qwen3')) {
+      payload.reasoning_format = 'parsed';
+    } else if (params.provider === 'openrouter') {
       payload.reasoning = { effort };
     }
 

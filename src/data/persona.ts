@@ -11,16 +11,16 @@ export const ENGINE_OPTIONS: EngineOption[] = [
     badge: '100% Free',
     providerKind: 'open-source',
     description:
-      'Default open-weights reasoning stack (GPT-OSS 120B, Nemotron 3 Ultra 550B, Qwen3.8 27B, Gemma 4 31B, or Cloudflare AI) with live open-web lookup — completely free.',
+      'Default open-weights reasoning stack (GPT-OSS 120B, Nemotron 3 Ultra 550B, GPT-OSS 20B, Qwen3.8 27B, or Cloudflare AI) with live open-web lookup — completely free.',
   },
   {
     id: 'oss-fast',
     name: 'Open-Source Fast',
-    shortName: 'Qwen3.8 · GPT-OSS',
+    shortName: 'GPT-OSS · Nemotron',
     badge: 'Fast · Free',
     providerKind: 'open-source',
     description:
-      'Sub-second open-weights dialogue (Qwen3.8 27B, GPT-OSS 20B, Llama 4 Scout, or OpenRouter Free) with automatic failover and zero cost.',
+      'Sub-second open-weights dialogue (GPT-OSS 20B, Nemotron 3.5 Lightning, Qwen3.8 27B, or Cloudflare AI) with automatic failover and zero cost.',
   },
   {
     id: 'gemini-flash',
@@ -245,6 +245,7 @@ export function buildAviSystemPrompt(
     ``,
     `REASONING & DIALOGUE:`,
     `- Deliberate deeply on the substance, definitions, causal mechanisms, counter-arguments, and tensions of the question, keeping preparatory thinking absorbed in the ideas themselves.`,
+    `- Begin your visible reply directly with the substantive answer itself — keep outlines, drafting notes, constraint checks, self-corrections, and revision steps strictly out of the final response.`,
     `- Reply naturally in British English. In ongoing multi-turn dialogues, answer the latest question directly and build forward from prior turns instead of repeating Turn 1.`,
     `- Integrate genuinely relied-upon numbered references cleanly as [1], [2] without inventing details (omit uncited references), and share https://calendly.com/aviperera/free-consultation or workwithavip@gmail.com only when asked about consulting or contact.`,
     useInlineThoughtTags

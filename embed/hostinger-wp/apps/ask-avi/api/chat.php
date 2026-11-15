@@ -316,11 +316,11 @@ $isFast = ($mode === 'oss-fast');
 $resolvedMaxTokens = $reqMaxTokens > 0 ? $reqMaxTokens : ($isFast ? 4096 : 8192);
 $resolvedEffort = $isFast ? 'low' : ($reqEffort !== '' ? $reqEffort : 'high');
 $groqModels = $isFast
-  ? ['qwen/qwen3.8-27b', 'openai/gpt-oss-20b', 'openai/gpt-oss-120b']
-  : ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b'];
+  ? ['openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-120b']
+  : ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
 $orModels = $isFast
-  ? ['nvidia/nemotron-3.5-lightning:free', 'openrouter/free', 'google/gemma-4-26b-a4b-it:free']
-  : ['nvidia/nemotron-3-ultra-550b-a55b:free', 'openrouter/free', 'google/gemma-4-31b-it:free', 'nvidia/nemotron-3.5-super-vl:free'];
+  ? ['nvidia/nemotron-3.5-lightning:free', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', 'baidu/ernie-5.5-flash-preview:free', 'nvidia/nemotron-3.5-super-vl:free']
+  : ['nvidia/nemotron-3-ultra-550b-a55b:free', 'nvidia/nemotron-3.5-super-vl:free', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', 'cohere/north-mini-code:free', 'nvidia/nemotron-3.5-lightning:free'];
 
 $lastStatus = 502;
 $lastError = 'Upstream open-source provider request failed.';
@@ -337,6 +337,8 @@ if ($groqKey !== '') {
     if (strpos($model, 'openai/gpt-oss') === 0) {
       $payload['reasoning_format'] = 'parsed';
       $payload['reasoning_effort'] = $resolvedEffort;
+    } elseif (strpos($model, 'qwen/qwen3') === 0) {
+      $payload['reasoning_format'] = 'parsed';
     }
     $attempt = ask_avi_stream_upstream(
       'https://api.groq.com/openai/v1/chat/completions',
@@ -366,10 +368,8 @@ if ($openRouterKey !== '') {
       'stream' => true,
       'temperature' => $temperature,
       'max_tokens' => $resolvedMaxTokens,
+      'reasoning' => ['effort' => $isFast ? 'low' : $resolvedEffort],
     ];
-    if (!$isFast) {
-      $payload['reasoning'] = ['effort' => $resolvedEffort];
-    }
     $attempt = ask_avi_stream_upstream(
       'https://openrouter.ai/api/v1/chat/completions',
       [

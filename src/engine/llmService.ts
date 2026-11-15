@@ -9,7 +9,8 @@ import type {
   WebSource,
 } from '../types/chat';
 import { formatContextsForPrompt } from '../utils/contextExtractor';
-import { sanitizeThinkingTrace, splitThinkingAndAnswer } from '../utils/thinking';
+import { separateLeakedCotFromAnswer } from '../utils/cotSeparator';
+import { sanitizeThinkingTrace } from '../utils/thinking';
 import {
   alignCitedSources,
   mergeCandidateSources,
@@ -64,21 +65,23 @@ function resolveAttachedPromptBlock(params: StreamGenerateParams): string {
 const keysWithoutNativeSearch = new Set<string>();
 
 const GROQ_MODELS_BY_ENGINE: Record<'oss-reasoning' | 'oss-fast', string[]> = {
-  'oss-reasoning': ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b'],
-  'oss-fast': ['qwen/qwen3.8-27b', 'openai/gpt-oss-20b', 'openai/gpt-oss-120b'],
+  'oss-reasoning': ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'],
+  'oss-fast': ['openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-120b'],
 };
 
 const OPENROUTER_MODELS_BY_ENGINE: Record<'oss-reasoning' | 'oss-fast', string[]> = {
   'oss-reasoning': [
     'nvidia/nemotron-3-ultra-550b-a55b:free',
-    'openrouter/free',
-    'google/gemma-4-31b-it:free',
     'nvidia/nemotron-3.5-super-vl:free',
+    'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+    'cohere/north-mini-code:free',
+    'nvidia/nemotron-3.5-lightning:free',
   ],
   'oss-fast': [
     'nvidia/nemotron-3.5-lightning:free',
-    'openrouter/free',
-    'google/gemma-4-26b-a4b-it:free',
+    'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+    'baidu/ernie-5.5-flash-preview:free',
+    'nvidia/nemotron-3.5-super-vl:free',
   ],
 };
 
@@ -317,13 +320,20 @@ class AviLLMService {
       let passReasoning = '';
       let passContent = '';
 
-      const buildCombined = () =>
-        [passReasoning.trim(), passContent.trim()].filter(Boolean).join('\n\n');
+      const buildCombined = () => {
+        const sep = separateLeakedCotFromAnswer(passContent, { flushPartial: true });
+        return {
+          display: [passReasoning.trim(), sep.extractedThinking, sep.cleanAnswer]
+            .filter(Boolean)
+            .join('\n\n'),
+          summary: sep.cleanAnswer || passReasoning.trim(),
+        };
+      };
 
       const emitIfChanged = () => {
         if (!onThoughtStream) return;
-        const combined = buildCombined();
-        if (combined) onThoughtStream(combined);
+        const { display } = buildCombined();
+        if (display) onThoughtStream(display);
       };
 
       const consumeLine = (rawLine: string) => {
@@ -350,8 +360,7 @@ class AviLLMService {
       }
       if (buffer.trim()) consumeLine(buffer);
 
-      const display = buildCombined();
-      const summary = passContent.trim() || passReasoning.trim();
+      const { display, summary } = buildCombined();
       return { display: display || summary, summary };
     };
 
@@ -369,6 +378,8 @@ class AviLLMService {
           if (model.startsWith('openai/gpt-oss')) {
             payload.reasoning_format = 'parsed';
             payload.reasoning_effort = reasoningEffort;
+          } else if (model.startsWith('qwen/qwen3')) {
+            payload.reasoning_format = 'parsed';
           }
           const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
@@ -544,7 +555,7 @@ class AviLLMService {
         attachedSummary: attachedBlock,
       }),
       reasoningEffort: 'low',
-      maxTokens: 700,
+      maxTokens: 900,
       temperature: 0.2,
     });
     const plan: PlannerResult = parsePlannerResult(planPass.summary, params.query, params.history);
@@ -604,7 +615,7 @@ class AviLLMService {
           attachedBlock,
         }),
         reasoningEffort: 'medium',
-        maxTokens: 1300,
+        maxTokens: 1600,
         temperature: 0.45,
         onThoughtStream: (live) => {
           const { cleanAnalysis } = extractFollowUpQueries(live);
@@ -659,8 +670,8 @@ class AviLLMService {
             round2Analysis: round2CleanAnalysis || plan.coreQuestion,
             candidatePoolBlock: poolTextB,
           }),
-          reasoningEffort: isFollowUp ? 'high' : 'medium',
-          maxTokens: 1100,
+          reasoningEffort: 'medium',
+          maxTokens: 1700,
           temperature: 0.35,
           onThoughtStream: (live) => {
             publishThoughts(`**Stress-testing counter-arguments & context**\n\n${live}`);
@@ -772,7 +783,9 @@ class AviLLMService {
         if (providerKind === 'groq' && model.startsWith('openai/gpt-oss')) {
           payload.reasoning_format = 'parsed';
           payload.reasoning_effort = finalReasoningEffort;
-        } else if (providerKind === 'openrouter' && tier !== 'oss-fast') {
+        } else if (providerKind === 'groq' && model.startsWith('qwen/qwen3')) {
+          payload.reasoning_format = 'parsed';
+        } else if (providerKind === 'openrouter') {
           payload.reasoning = { effort: finalReasoningEffort };
         }
 
@@ -1229,23 +1242,14 @@ class AviLLMService {
     };
 
     const computeViewState = (flushPartial = false) => {
-      if (opts.protocol === 'openai' && !structuredThoughts && /^\s*<(?:thought|think)\b/i.test(rawAnswer)) {
-        const split = splitThinkingAndAnswer(rawAnswer);
-        const isThinkingNow = split.answer.length === 0;
-        return {
-          thoughts: mergeThoughts(split.thinking, flushPartial || !isThinkingNow),
-          answer: split.answer,
-          isThinking: isThinkingNow,
-        };
-      }
-      const cleanAnswer =
-        opts.protocol === 'openai'
-          ? rawAnswer.replace(/<\/?(?:thought|think)\b[^>]*>/gi, '').replace(/^\s+/, '')
-          : rawAnswer;
-      const isThinkingNow = cleanAnswer.length === 0;
+      const sep = separateLeakedCotFromAnswer(rawAnswer, { flushPartial });
+      const combinedPass4Thoughts = [structuredThoughts.trim(), sep.extractedThinking.trim()]
+        .filter(Boolean)
+        .join('\n\n');
+      const isThinkingNow = sep.cleanAnswer.length === 0 || sep.isHoldingBack;
       return {
-        thoughts: mergeThoughts(structuredThoughts, flushPartial || !isThinkingNow),
-        answer: cleanAnswer,
+        thoughts: mergeThoughts(combinedPass4Thoughts, flushPartial || !isThinkingNow),
+        answer: sep.cleanAnswer,
         isThinking: isThinkingNow,
       };
     };

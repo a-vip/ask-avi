@@ -141,7 +141,7 @@ function transformProseSegments(
     .join('');
 }
 
-const CITE_GROUP_RE = /\[(\d{1,2}(?:\s*,\s*\d{1,2})*)\](?!\(|\[|:)/g;
+const CITE_GROUP_RE = /\[(\d{1,2}(?:\s*,\s*\d{1,2})*)\](?!\(|:(?=\s|$)|\[(?![\d,\s]+\]))/g;
 
 /**
  * Parses `[n]` (and comma groups like `[1, 3]`) actually cited in the final answer,

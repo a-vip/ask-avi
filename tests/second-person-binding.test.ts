@@ -121,12 +121,14 @@ describe('Second-person ("you"/"your") binding to Avi Perera', () => {
     );
 
     const aligned = alignCitedSources(
-      'My frame of reference leans slightly Buddhist [1], never formal dogma\u202F[2]. See also `items[2]` and [link](https://example.com).',
+      'My frame of reference leans slightly Buddhist [1], never formal dogma\u202F[2]. Identity claims fail here [6][1]. See also `items[2]` and [link](https://example.com).',
       candidates
     );
 
     expect(aligned.sources).toHaveLength(1);
     expect(aligned.content).toContain('[1], never formal dogma.');
+    expect(aligned.content).toContain('fail here [1].');
+    expect(aligned.content).not.toContain('[6]');
     expect(aligned.content).not.toContain('dogma\u202F[2]');
     expect(aligned.content).toContain('`items[2]`');
     expect(aligned.content).toContain('[link](https://example.com)');

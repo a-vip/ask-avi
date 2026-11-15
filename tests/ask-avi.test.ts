@@ -468,6 +468,7 @@ describe('Thread Storage & Export Helpers', () => {
   it('strips leaked prompt, persona, spelling, and citation checklists from visible thinking while keeping domain reasoning', () => {
     const leakedTrace = [
       'We need to respond as ChatGPT, but with a specific persona: The user is asking: "What draws you to Spinoza?" Must not give a canned answer.',
+      'The user is presumably addressing the persona "Avi Perera". The response should not be overly academic, but clear, unpretentious.',
       'Must be candid, incisive, warmly. Use live web findings when current facts matter, never stitching canned passages from old essays. Use archive references quietly as [1], [2] if needed. No invented details.',
       'Spinoza treats causal structure and conatus as immanent rather than external to human agency.',
       'We need to follow developer instructions: respond directly in first person, no cosplay. Also need to point to the Calendly link.',

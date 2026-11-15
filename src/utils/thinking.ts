@@ -61,9 +61,10 @@ const META_REASONING_LINE_RES: RegExp[] = [
 const META_REASONING_SENTENCE_RES: RegExp[] = [
   /\b(?:developer|system|hidden|backend|master)\s+(?:instructions?|prompts?|rules?|guidelines?|policy|policies)\b/i,
   /\b(?:as\s+per|per)\s+(?:the\s+|your\s+|their\s+)?(?:instructions?|prompt|guidelines?|persona|policy|background)\b/i,
-  /\b(?:in|into|as|adopt(?:ing)?|maintain(?:ing)?|stay(?:ing)?\s+in|true\s+to|keep(?:ing)?\s+(?:it\s+)?(?:in|true\s+to)|answer(?:ing)?\s+in|respond(?:ing)?\s+in)\s+(?:the\s+)?(?:persona|character|voice)(?:\s+and\s+voice)?\s*(?:of\s+(?:Avi|Ask\s*Avi))?\b/i,
-  /\((?:the\s+)?persona\)/i,
-  /^(?:the\s+|they\s+(?:are\s+)?asking\s+for\s+|user\s+)?(?:user\s+)?(?:asks|wants\s+(?:(?:an?\s+)?first[- ]person\s+answer|a\s+personal\s+perspective|an?\s+answer)|are\s+asking\s+for\s+a\s+personal\s+perspective|is\s+(?:presumably\s+)?(?:speaking\s+to|asking))\b/i,
+  /\b(?:in|into|as|adopt(?:ing)?|maintain(?:ing)?|stay(?:ing)?\s+in|true\s+to|keep(?:ing)?\s+(?:it\s+)?(?:in|true\s+to)|answer(?:ing)?\s+in|respond(?:ing)?\s+in|address(?:ing)?)\s+(?:the\s+)?(?:persona|character|voice)(?:\s+and\s+voice)?\s*(?:["']?(?:of\s+)?(?:Avi|Ask\s*Avi)["']?)?\b/i,
+  /\((?:the\s+)?persona\)|\bpersona\s*["'](?:Avi|Ask\s*Avi)["']/i,
+  /^(?:the\s+|they\s+(?:are\s+)?asking\s+for\s+|user\s+)?(?:user\s+)?(?:asks|wants\s+(?:(?:an?\s+)?first[- ]person\s+answer|a\s+personal\s+perspective|an?\s+answer)|are\s+asking\s+for\s+a\s+personal\s+perspective|is\s+(?:presumably\s+)?(?:speaking\s+to|asking|addressing))\b/i,
+  /\b(?:the\s+)?(?:answer|response|reply)\s+should\s+(?:not\s+be\s+(?:overly\s+)?academic|be\s+(?:clear|candid|unpretentious|warm|conversational))\b/i,
   /\bshould\s+(?:include\s+references|not\s+(?:produce|give|write)\s+(?:a\s+)?generic\s+essay)\b/i,
   /\bin\s+(?:a\s+)?conversational\s+(?:style|tone)\b/i,
   /\b(?:respond|act)(?:ing)?\s+as\s+(?:ChatGPT|Claude|Gemini|OpenAI|an\s+AI|the\s+persona|Avi(?:\s+Perera)?|Ask\s*Avi)\b/i,

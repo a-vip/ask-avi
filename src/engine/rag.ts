@@ -187,6 +187,47 @@ class KnowledgeIndex {
     const end = typeof performance !== 'undefined' ? performance.now() : Date.now();
     return { sources, elapsedMs: Math.max(1, Math.round(end - start)) };
   }
+
+  /**
+   * Executes multiple resolved search queries (e.g. from the query planner)
+   * and returns the highest-scoring distinct entries without repeating Turn 1 anchors unnecessarily.
+   */
+  public multiSearch(
+    queries: string[],
+    options?: { topK?: number; minScore?: number }
+  ): { sources: RetrievedSource[]; elapsedMs: number } {
+    const start = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const topK = options?.topK ?? 4;
+    const minScore = options?.minScore ?? 4.0;
+    const cleanQueries = queries
+      .map((q) => q.replace(/\s+/g, ' ').trim())
+      .filter((q) => q.length >= 2)
+      .slice(0, 4);
+
+    if (cleanQueries.length === 0) {
+      const end = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      return { sources: [], elapsedMs: Math.max(1, Math.round(end - start)) };
+    }
+
+    const byEntryId = new Map<string, RetrievedSource>();
+    for (const q of cleanQueries) {
+      const { sources } = this.search(q, { topK: Math.max(topK, 4), minScore });
+      for (const hit of sources) {
+        const prev = byEntryId.get(hit.entry.id);
+        if (!prev || hit.score > prev.score) {
+          byEntryId.set(hit.entry.id, hit);
+        }
+      }
+    }
+
+    const merged = Array.from(byEntryId.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, topK)
+      .map((item, idx) => ({ ...item, index: idx + 1 }));
+
+    const end = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    return { sources: merged, elapsedMs: Math.max(1, Math.round(end - start)) };
+  }
 }
 
 function pickBestSnippet(entry: KnowledgeEntry, matchedTerms: string[]): string {

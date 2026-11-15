@@ -28,6 +28,15 @@ if (!is_array($body) || empty($body['contents']) || !is_array($body['contents'])
 }
 
 $mode = (string) ($body['mode'] ?? 'oss-reasoning');
+$phase = (($body['phase'] ?? 'final') === 'deliberate') ? 'deliberate' : 'final';
+if ($phase === 'deliberate' && !defined('ASK_AVI_SKIP_OK_TELEMETRY')) {
+  define('ASK_AVI_SKIP_OK_TELEMETRY', true);
+}
+$reqEffortRaw = strtolower(trim((string) ($body['reasoningEffort'] ?? '')));
+$reqEffort = in_array($reqEffortRaw, ['low', 'medium', 'high'], true) ? $reqEffortRaw : '';
+$reqMaxTokens = isset($body['maxTokens']) && is_numeric($body['maxTokens'])
+  ? max(256, min(8192, (int) $body['maxTokens']))
+  : 0;
 $temperature = isset($body['temperature']) ? (float) $body['temperature'] : 0.72;
 $temperature = max(0.0, min(1.3, $temperature));
 $isAuthenticated = ($reqUser !== null);
@@ -40,7 +49,10 @@ $systemInstruction = ask_avi_assemble_system_prompt(
   (string) ($body['archiveBlock'] ?? ''),
   (string) ($body['webContext'] ?? ''),
   (string) ($body['attachedContext'] ?? ''),
-  $isAuthenticated
+  $isAuthenticated,
+  (string) ($body['continuityBrief'] ?? ''),
+  (string) ($body['reasoningSynthesis'] ?? ''),
+  $phase
 );
 
 function ask_avi_clip_text(string $text, int $limit): string {
@@ -301,6 +313,8 @@ if ($groqKey === '' && $openRouterKey === '') {
 
 $messages = ask_avi_to_openai_messages($body['contents'], $systemInstruction, $isAuthenticated);
 $isFast = ($mode === 'oss-fast');
+$resolvedMaxTokens = $reqMaxTokens > 0 ? $reqMaxTokens : ($isFast ? 4096 : 8192);
+$resolvedEffort = $isFast ? 'low' : ($reqEffort !== '' ? $reqEffort : 'high');
 $groqModels = $isFast
   ? ['qwen/qwen3.8-27b', 'openai/gpt-oss-20b', 'openai/gpt-oss-120b']
   : ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b'];
@@ -318,11 +332,11 @@ if ($groqKey !== '') {
       'messages' => $messages,
       'stream' => true,
       'temperature' => $temperature,
-      'max_tokens' => $isFast ? 4096 : 8192,
+      'max_tokens' => $resolvedMaxTokens,
     ];
     if (strpos($model, 'openai/gpt-oss') === 0) {
       $payload['reasoning_format'] = 'parsed';
-      $payload['reasoning_effort'] = $isFast ? 'low' : 'high';
+      $payload['reasoning_effort'] = $resolvedEffort;
     }
     $attempt = ask_avi_stream_upstream(
       'https://api.groq.com/openai/v1/chat/completions',
@@ -351,10 +365,10 @@ if ($openRouterKey !== '') {
       'messages' => $messages,
       'stream' => true,
       'temperature' => $temperature,
-      'max_tokens' => $isFast ? 4096 : 8192,
+      'max_tokens' => $resolvedMaxTokens,
     ];
     if (!$isFast) {
-      $payload['reasoning'] = ['effort' => 'high'];
+      $payload['reasoning'] = ['effort' => $resolvedEffort];
     }
     $attempt = ask_avi_stream_upstream(
       'https://openrouter.ai/api/v1/chat/completions',

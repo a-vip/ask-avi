@@ -79,11 +79,14 @@ async function handleApiRequest(
     try {
       const parsed = JSON.parse(Buffer.from(body).toString('utf8')) as {
         mode?: string;
+        phase?: 'deliberate' | 'final';
         model?: string;
         voiceStyle?: string;
         archiveBlock?: string;
         webContext?: string;
         attachedContext?: string;
+        continuityBrief?: string;
+        reasoningSynthesis?: string;
         systemInstruction?: string;
         contents?: Array<{ role?: string; parts?: Array<{ text?: string }> }>;
       };
@@ -101,8 +104,8 @@ async function handleApiRequest(
         return;
       }
 
-      const maxSysChars = bearerUser ? 18000 : 12000;
-      const maxTurns = bearerUser ? 18 : 12;
+      const maxSysChars = bearerUser ? 22000 : 16000;
+      const maxTurns = bearerUser ? 20 : 14;
       const maxPartChars = bearerUser ? 10000 : 6000;
       const localMasterPath = join(ROOT_DIR, '.ask-avi-data', 'master-prompt.txt');
       const localMasterOverride = existsSync(localMasterPath)
@@ -115,6 +118,9 @@ async function handleApiRequest(
         archiveBlock: parsed.archiveBlock,
         webContext: parsed.webContext,
         attachedContext: parsed.attachedContext,
+        continuityBrief: parsed.continuityBrief,
+        reasoningSynthesis: parsed.reasoningSynthesis,
+        phase: parsed.phase === 'deliberate' ? 'deliberate' : 'final',
         isAuthenticated: Boolean(bearerUser),
       }).slice(0, maxSysChars);
       if (Array.isArray(parsed.contents)) {
@@ -258,17 +264,29 @@ const server = createServer(async (req, res) => {
         return (origEnd as (...args: unknown[]) => ServerResponse)(chunk, ...rest);
       }) as ServerResponse['end'];
 
+      const rawChatBody = await readBodyBuffer(req);
+      let isDeliberatePhase = false;
+      if (rawChatBody) {
+        try {
+          const preview = JSON.parse(Buffer.from(rawChatBody).toString('utf8')) as { phase?: string };
+          isDeliberatePhase = preview.phase === 'deliberate';
+        } catch {
+          isDeliberatePhase = false;
+        }
+      }
+
       res.on('finish', () => {
+        const finalCode = res.statusCode || capturedStatus;
+        if (isDeliberatePhase && finalCode < 400) return;
         authMod.recordChatTelemetry({
           user: bearerUser,
-          statusCode: res.statusCode || capturedStatus,
+          statusCode: finalCode,
           modelUsed: capturedModel || undefined,
           latencyMs: Date.now() - startedAt,
           errorMessage: errorSnippet ? errorSnippet.slice(0, 400) : undefined,
         });
       });
 
-      const rawChatBody = await readBodyBuffer(req);
       await handleApiRequest(req, res, rawChatBody, bearerUser);
       return;
     }

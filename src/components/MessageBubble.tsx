@@ -73,12 +73,27 @@ export function MessageBubble({
       url: resolveSourceUrl(src.entry.url, src.entry.doi),
       title: src.entry.title,
     }));
-    if (archive.length > 0) return archive;
-    return (message.webSources ?? []).map((ws, i) => ({
-      index: ws.index || i + 1,
+    const web = (message.webSources ?? []).map((ws, i) => ({
+      index: ws.index || archive.length + i + 1,
       url: resolveSourceUrl(ws.url),
       title: ws.title,
     }));
+    return [...archive, ...web].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  }, [message.sources, message.webSources]);
+
+  const orderedFooterSources = useMemo(() => {
+    type FooterItem =
+      | { kind: 'archive'; index: number; src: RetrievedSource }
+      | { kind: 'web'; index: number; ws: NonNullable<ChatMessage['webSources']>[number] };
+
+    const items: FooterItem[] = [];
+    for (const src of message.sources ?? []) {
+      items.push({ kind: 'archive', index: src.index, src });
+    }
+    for (const ws of message.webSources ?? []) {
+      items.push({ kind: 'web', index: ws.index || items.length + 1, ws });
+    }
+    return items.sort((a, b) => a.index - b.index);
   }, [message.sources, message.webSources]);
 
   const renderedAnswerHtml = useMemo(() => {
@@ -296,9 +311,6 @@ export function MessageBubble({
     );
   }
 
-  const hasWebSources = Boolean(message.webSources && message.webSources.length > 0);
-  const hasArchiveSources = Boolean(message.sources && message.sources.length > 0);
-
   return (
     <article className="msg-row msg-assistant-row" aria-label="Avi response">
       <div className="msg-assistant-avatar">
@@ -463,23 +475,26 @@ export function MessageBubble({
 
         {!message.isStreaming && message.content && !message.needsBackendSetup && !message.needsAuth && (
           <>
-            {(hasWebSources || hasArchiveSources) && (
+            {orderedFooterSources.length > 0 && (
               <div className="inline-sources-strip">
-                {message.webSources?.map((ws) => (
-                  <a
-                    key={ws.url}
-                    href={ws.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="source-chip-btn web-source-chip"
-                    title={ws.url}
-                  >
-                    <Globe size={12} className="web-chip-icon" />
-                    <span className="source-chip-title">{ws.title}</span>
-                  </a>
-                ))}
-
-                {message.sources?.map((src) => {
+                {orderedFooterSources.map((item) => {
+                  if (item.kind === 'web') {
+                    return (
+                      <a
+                        key={`web-${item.ws.url}`}
+                        href={item.ws.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="source-chip-btn web-source-chip"
+                        title={`${item.ws.title} — ${item.ws.url}`}
+                      >
+                        <span className="source-chip-num">{item.index}</span>
+                        <Globe size={12} className="web-chip-icon" />
+                        <span className="source-chip-title">{item.ws.title}</span>
+                      </a>
+                    );
+                  }
+                  const src = item.src;
                   const href = resolveSourceUrl(src.entry.url, src.entry.doi);
                   if (href) {
                     return (
@@ -491,7 +506,7 @@ export function MessageBubble({
                         className="source-chip-btn"
                         title={`${src.entry.title} — ${href}`}
                       >
-                        <span className="source-chip-num">{src.index}</span>
+                        <span className="source-chip-num">{item.index}</span>
                         <span className="source-chip-title">{src.entry.title}</span>
                       </a>
                     );
@@ -501,10 +516,10 @@ export function MessageBubble({
                       key={src.entry.id}
                       type="button"
                       className="source-chip-btn"
-                      onClick={() => onInspectSource(message.sources!, src.index)}
+                      onClick={() => onInspectSource(message.sources!, item.index)}
                       title={src.entry.title}
                     >
-                      <span className="source-chip-num">{src.index}</span>
+                      <span className="source-chip-num">{item.index}</span>
                       <span className="source-chip-title">{src.entry.title}</span>
                     </button>
                   );

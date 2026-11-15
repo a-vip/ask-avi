@@ -1,4 +1,4 @@
-import { buildAviSystemPrompt, ENGINE_OPTIONS, formatArchiveRefsBlock } from '../data/persona';
+import { buildAviSystemPrompt, ENGINE_OPTIONS } from '../data/persona';
 import type {
   AttachedContext,
   ChatMessage,
@@ -11,13 +11,30 @@ import type {
 import { formatContextsForPrompt } from '../utils/contextExtractor';
 import { sanitizeThinkingTrace, splitThinkingAndAnswer } from '../utils/thinking';
 import {
+  alignCitedSources,
+  mergeCandidateSources,
+  splitFormattedCandidateBlocks,
+  type CandidateSource,
+} from './citations';
+import {
+  buildFinalContinuityBrief,
+  buildPass1PlanMessages,
+  buildPass2ExploreMessages,
+  buildPass3CritiqueMessages,
+  buildRichConversationWindow,
+  extractFollowUpQueries,
+  formatPlanForThinking,
+  isTrivialOpeningGreeting,
+  parsePlannerResult,
+  type PlannerResult,
+} from './deliberation';
+import {
   extractGeminiChunkDelta,
   extractOpenAIChunkDelta,
   mergeUniqueQueries,
-  mergeUniqueWebSources,
 } from './geminiStream';
 import { knowledgeIndex } from './rag';
-import { fetchOpenWebFallback } from './webFallback';
+import { fetchTargetedWebResearch } from './webFallback';
 
 export class BackendNotConfiguredError extends Error {
   constructor(message: string) {
@@ -140,23 +157,73 @@ function buildConversationWindow(
   maxTurns: number,
   maxChars: number
 ): Array<{ role: 'user' | 'assistant'; content: string }> {
-  const cleaned = history
-    .filter((m) => !m.isStreaming && !m.needsBackendSetup && m.content.trim().length > 0)
-    .slice(-maxTurns)
-    .map((m) => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content.trim().slice(0, 2600),
-    }));
+  return buildRichConversationWindow(history, maxTurns, maxChars);
+}
 
-  const out: Array<{ role: 'user' | 'assistant'; content: string }> = [];
-  let budget = maxChars;
-  for (let i = cleaned.length - 1; i >= 0; i--) {
-    const turn = cleaned[i];
-    if (out.length > 0 && turn.content.length > budget) break;
-    budget -= turn.content.length;
-    out.unshift(turn);
+function mergeDistinctArchiveSources(
+  base: RetrievedSource[],
+  incoming: RetrievedSource[],
+  cap = 5
+): RetrievedSource[] {
+  const byId = new Map<string, RetrievedSource>();
+  for (const s of [...base, ...incoming]) {
+    const prev = byId.get(s.entry.id);
+    if (!prev || s.score > prev.score) {
+      byId.set(s.entry.id, s);
+    }
+  }
+  return Array.from(byId.values())
+    .sort((a, b) => b.score - a.score)
+    .slice(0, cap)
+    .map((s, idx) => ({ ...s, index: idx + 1 }));
+}
+
+function mergeDistinctWebItems(
+  base: WebSource[],
+  incoming: WebSource[],
+  cap = 7
+): WebSource[] {
+  const seen = new Set<string>();
+  const out: WebSource[] = [];
+  for (const w of [...base, ...incoming]) {
+    const key = w.url.trim().replace(/\/+$/, '').toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ ...w, index: out.length + 1 });
+    if (out.length >= cap) break;
   }
   return out;
+}
+
+function deriveCitedFollowUps(
+  citedArchive: RetrievedSource[],
+  citedWeb: WebSource[],
+  answerText: string
+): string[] {
+  const suggestions: string[] = [];
+  const lowerAns = answerText.toLowerCase();
+
+  if (lowerAns.includes('article 36') || lowerAns.includes('ihl') || lowerAns.includes('humanitarian')) {
+    suggestions.push('How would you test that in an Article 36 legal review?');
+  }
+  if (lowerAns.includes('spinoza') || lowerAns.includes('causal') || lowerAns.includes('incentive')) {
+    suggestions.push('Where does that framework hit its hardest legal or institutional limit?');
+  }
+  if (citedArchive.length > 0) {
+    const first = citedArchive[0].entry;
+    if (!lowerAns.includes(first.title.toLowerCase().slice(0, 20))) {
+      suggestions.push(`How does this connect with "${first.title}"?`);
+    }
+  } else if (citedWeb.length > 0) {
+    suggestions.push('What primary evidence or counter-case challenges that source?');
+  }
+  if (suggestions.length < 2) {
+    suggestions.push('What is the strongest counter-argument to this conclusion?');
+  }
+  if (suggestions.length < 2) {
+    suggestions.push('How does that play out when incentives fail in practice?');
+  }
+  return Array.from(new Set(suggestions)).slice(0, 2);
 }
 
 export function resolveEffectiveProxyUrl(customProxyUrl?: string): string {
@@ -174,32 +241,6 @@ export function resolveEffectiveProxyUrl(customProxyUrl?: string): string {
     }
   }
   return '';
-}
-
-function deriveFollowUps(
-  sources: RetrievedSource[],
-  webSources: WebSource[],
-  answerText: string
-): string[] {
-  if (sources.length > 0) {
-    const first = sources[0]?.entry;
-    if (first) {
-      return [
-        `Where do you see the strongest counter-argument to that view?`,
-        `How would you apply "${first.title.slice(0, 42)}${first.title.length > 42 ? '…' : ''}" to recent events?`,
-      ];
-    }
-  }
-  if (/```/.test(answerText)) {
-    return [
-      'Can we stress-test edge cases or simplify this architecture?',
-      'Walk through the security and failure modes of this approach.',
-    ];
-  }
-  if (webSources.length > 0) {
-    return ['What do you think happens next, and where are the blind spots here?'];
-  }
-  return [];
 }
 
 function formatOpenModelLabel(modelId: string, providerName: string): string {
@@ -249,6 +290,413 @@ class AviLLMService {
     );
   }
 
+  private async streamDeliberationPass(opts: {
+    params: StreamGenerateParams;
+    messages: Array<{ role: 'system' | 'user'; content: string }>;
+    reasoningEffort: 'low' | 'medium' | 'high';
+    maxTokens: number;
+    temperature: number;
+    onThoughtStream?: (accumulatedPassText: string) => void;
+  }): Promise<{ display: string; summary: string }> {
+    const { params, messages, reasoningEffort, maxTokens, temperature, onThoughtStream } = opts;
+    if (params.signal?.aborted) return { display: '', summary: '' };
+
+    const groqKey = params.groqApiKey?.trim();
+    const openRouterKey = params.openRouterApiKey?.trim();
+    const directGeminiKey = params.geminiApiKey?.trim();
+    const proxyUrl = resolveEffectiveProxyUrl(params.proxyUrl);
+
+    const readSseStreamText = async (
+      response: Response,
+      protocol: 'openai' | 'gemini'
+    ): Promise<{ display: string; summary: string }> => {
+      if (!response.ok || !response.body) return { display: '', summary: '' };
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let passReasoning = '';
+      let passContent = '';
+
+      const buildCombined = () =>
+        [passReasoning.trim(), passContent.trim()].filter(Boolean).join('\n\n');
+
+      const emitIfChanged = () => {
+        if (!onThoughtStream) return;
+        const combined = buildCombined();
+        if (combined) onThoughtStream(combined);
+      };
+
+      const consumeLine = (rawLine: string) => {
+        const trimmed = rawLine.trim();
+        if (!trimmed.startsWith('data:')) return;
+        const payload = trimmed.slice(5).trim();
+        if (!payload || payload === '[DONE]') return;
+        const delta =
+          protocol === 'gemini'
+            ? extractGeminiChunkDelta(payload)
+            : extractOpenAIChunkDelta(payload);
+        if (delta.thoughtDelta) passReasoning += delta.thoughtDelta;
+        if (delta.answerDelta) passContent += delta.answerDelta;
+        if (delta.thoughtDelta || delta.answerDelta) emitIfChanged();
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) consumeLine(line);
+      }
+      if (buffer.trim()) consumeLine(buffer);
+
+      const display = buildCombined();
+      const summary = passContent.trim() || passReasoning.trim();
+      return { display: display || summary, summary };
+    };
+
+    try {
+      if (groqKey) {
+        for (const model of GROQ_MODELS_BY_ENGINE['oss-reasoning']) {
+          if (params.signal?.aborted) return { display: '', summary: '' };
+          const payload: Record<string, unknown> = {
+            model,
+            messages,
+            stream: true,
+            temperature,
+            max_tokens: maxTokens,
+          };
+          if (model.startsWith('openai/gpt-oss')) {
+            payload.reasoning_format = 'parsed';
+            payload.reasoning_effort = reasoningEffort;
+          }
+          const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${groqKey}` },
+            signal: params.signal,
+            body: JSON.stringify(payload),
+          });
+          if (res.ok && res.body) {
+            const out = await readSseStreamText(res, 'openai');
+            if (out.summary || out.display) return out;
+          }
+          if (res.status !== 404 && res.status !== 429 && res.status !== 503) break;
+        }
+      }
+
+      if (openRouterKey) {
+        const originRef =
+          typeof window !== 'undefined' ? window.location.origin : 'https://aviperera.com';
+        for (const model of OPENROUTER_MODELS_BY_ENGINE['oss-reasoning']) {
+          if (params.signal?.aborted) return { display: '', summary: '' };
+          const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${openRouterKey}`,
+              'HTTP-Referer': originRef,
+              'X-Title': 'Ask Avi',
+            },
+            signal: params.signal,
+            body: JSON.stringify({
+              model,
+              messages,
+              stream: true,
+              temperature,
+              max_tokens: maxTokens,
+              reasoning: { effort: reasoningEffort },
+            }),
+          });
+          if (res.ok && res.body) {
+            const out = await readSseStreamText(res, 'openai');
+            if (out.summary || out.display) return out;
+          }
+          if (res.status !== 404 && res.status !== 429 && res.status !== 503 && res.status !== 402) break;
+        }
+      }
+
+      if (proxyUrl) {
+        const flattenedPrompt = messages.map((m) => m.content).join('\n\n');
+        const res = await fetch(proxyUrl, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(params.sessionToken ? { Authorization: `Bearer ${params.sessionToken}` } : {}),
+          },
+          signal: params.signal,
+          body: JSON.stringify({
+            mode: 'oss-reasoning',
+            phase: 'deliberate',
+            reasoningEffort,
+            maxTokens,
+            enableSearch: false,
+            temperature,
+            contents: [{ role: 'user', parts: [{ text: flattenedPrompt }] }],
+          }),
+        });
+        if (res.ok && res.body) {
+          const proto = res.headers.get('X-Ask-Avi-Protocol') === 'gemini' ? 'gemini' : 'openai';
+          return await readSseStreamText(res, proto);
+        }
+      }
+
+      if (directGeminiKey) {
+        const sysPart = messages.find((m) => m.role === 'system')?.content ?? '';
+        const usrPart = messages.filter((m) => m.role === 'user').map((m) => m.content).join('\n\n');
+        const gemRes = await fetch(
+          'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:streamGenerateContent?alt=sse',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': directGeminiKey,
+            },
+            signal: params.signal,
+            body: JSON.stringify({
+              systemInstruction: sysPart ? { parts: [{ text: sysPart }] } : undefined,
+              contents: [{ role: 'user', parts: [{ text: usrPart }] }],
+              generationConfig: {
+                temperature,
+                maxOutputTokens: maxTokens,
+                thinkingConfig: { includeThoughts: false, thinkingBudget: 2048 },
+              },
+            }),
+          }
+        );
+        if (gemRes.ok && gemRes.body) {
+          return await readSseStreamText(gemRes, 'gemini');
+        }
+      }
+    } catch (err) {
+      if (params.signal?.aborted) throw err;
+    }
+
+    return { display: '', summary: '' };
+  }
+
+  private async runIterativeDeliberation(opts: {
+    params: StreamGenerateParams;
+    initialSources: RetrievedSource[];
+    deepReasoning: boolean;
+    pipelineStartedAt: number;
+  }): Promise<{
+    candidates: CandidateSource[];
+    archiveBlock: string;
+    webContext: string;
+    archiveSources: RetrievedSource[];
+    webSources: WebSource[];
+    webSearchQueries: string[];
+    accumulatedThoughts: string;
+    continuityBrief: string;
+    reasoningSynthesis: string;
+  }> {
+    const { params, initialSources, deepReasoning, pipelineStartedAt } = opts;
+    const isFollowUp = params.history.length > 0;
+    const attachedBlock = resolveAttachedPromptBlock(params);
+
+    let webSearchQueries: string[] = [];
+    let archiveSources: RetrievedSource[] = [...initialSources];
+    let webSources: WebSource[] = [];
+    const thoughtSections: string[] = [];
+
+    const publishThoughts = (liveSection = '') => {
+      const combined = [...thoughtSections, liveSection].filter(Boolean).join('\n\n---\n\n');
+      params.onUpdate({
+        content: '',
+        thoughts: sanitizeThinkingTrace(combined, false),
+        isThinking: true,
+        thinkingMs: Math.max(200, Date.now() - pipelineStartedAt),
+        webSearchQueries,
+        webSources: [],
+      });
+    };
+
+    const trivial = isTrivialOpeningGreeting(params.query, params.history);
+    if (trivial) {
+      const candidates = mergeCandidateSources([], []);
+      return {
+        candidates,
+        archiveBlock: '',
+        webContext: '',
+        archiveSources: [],
+        webSources: [],
+        webSearchQueries: [],
+        accumulatedThoughts: '',
+        continuityBrief: '',
+        reasoningSynthesis: '',
+      };
+    }
+
+    // Immediate opening indicator while Stage 1 decomposes conversation state & queries
+    publishThoughts(
+      isFollowUp
+        ? 'Reviewing the conversation arc and framing the follow-up inquiry…'
+        : 'Analysing the core question and planning first-principles inquiry…'
+    );
+
+    // Stage 1: Conversation State Parsing & Research Strategy
+    const planPass = await this.streamDeliberationPass({
+      params,
+      messages: buildPass1PlanMessages({
+        query: params.query,
+        history: params.history,
+        attachedSummary: attachedBlock,
+      }),
+      reasoningEffort: 'low',
+      maxTokens: 700,
+      temperature: 0.2,
+    });
+    const plan: PlannerResult = parsePlannerResult(planPass.summary, params.query, params.history);
+    thoughtSections.push(formatPlanForThinking(plan, isFollowUp));
+    publishThoughts();
+
+    // Research Pass A: Resolved Internal Archive RAG + Targeted Open Web & Academic Search
+    const ragQueries = Array.from(
+      new Set([plan.coreQuestion, ...plan.archiveQueries].filter((q) => q.length >= 3))
+    );
+    const resolvedRag = knowledgeIndex.multiSearch(ragQueries, {
+      topK: 4,
+      minScore: isFollowUp && plan.conversationShift === 'pivoting' ? 4.5 : 4.0,
+    });
+    archiveSources =
+      isFollowUp && plan.conversationShift === 'pivoting'
+        ? resolvedRag.sources
+        : mergeDistinctArchiveSources(
+            resolvedRag.sources.length > 0 ? resolvedRag.sources : initialSources,
+            resolvedRag.sources,
+            4
+          );
+
+    if (params.webSearchEnabled && plan.webQueries.length > 0) {
+      const roundA = await fetchTargetedWebResearch(plan.webQueries, {
+        userSignal: params.signal,
+        maxSources: 5,
+        timeoutMs: 5500,
+      });
+      if (roundA.queries.length > 0) {
+        webSearchQueries = mergeUniqueQueries(webSearchQueries, roundA.queries);
+      }
+      if (roundA.webSources.length > 0) {
+        webSources = mergeDistinctWebItems(webSources, roundA.webSources, 6);
+      }
+      publishThoughts();
+    }
+
+    let round2CleanAnalysis = '';
+    let round3Critique = '';
+
+    if (deepReasoning && !params.signal?.aborted) {
+      // Stage 2: Multi-Angle First-Principles Exploration & Evidence Interrogation
+      const initialCandidates = mergeCandidateSources(archiveSources, webSources);
+      const initialPoolBlocks = splitFormattedCandidateBlocks(initialCandidates);
+      const poolTextA = [initialPoolBlocks.archiveBlock, initialPoolBlocks.webContext]
+        .filter(Boolean)
+        .join('\n\n');
+
+      const explorePass = await this.streamDeliberationPass({
+        params,
+        messages: buildPass2ExploreMessages({
+          plan,
+          query: params.query,
+          history: params.history,
+          candidatePoolBlock: poolTextA,
+          attachedBlock,
+        }),
+        reasoningEffort: 'medium',
+        maxTokens: 1300,
+        temperature: 0.45,
+        onThoughtStream: (live) => {
+          const { cleanAnalysis } = extractFollowUpQueries(live);
+          if (cleanAnalysis) {
+            publishThoughts(`**Examining perspectives & evidence**\n\n${cleanAnalysis}`);
+          }
+        },
+      });
+
+      const exploreDisplay = extractFollowUpQueries(explorePass.display).cleanAnalysis;
+      const { cleanAnalysis, followUpQueries } = extractFollowUpQueries(explorePass.summary);
+      round2CleanAnalysis = cleanAnalysis;
+      if (exploreDisplay) {
+        thoughtSections.push(`**Examining perspectives & evidence**\n\n${exploreDisplay}`);
+        publishThoughts();
+      }
+
+      // Research Pass B: Adaptive Secondary Retrieval driven by Stage 2 discoveries
+      if (params.webSearchEnabled && followUpQueries.length > 0 && !params.signal?.aborted) {
+        const extraRag = knowledgeIndex.multiSearch(followUpQueries, { topK: 2, minScore: 4.5 });
+        if (extraRag.sources.length > 0) {
+          archiveSources = mergeDistinctArchiveSources(archiveSources, extraRag.sources, 5);
+        }
+        const roundB = await fetchTargetedWebResearch(followUpQueries, {
+          userSignal: params.signal,
+          maxSources: 3,
+          timeoutMs: 4500,
+        });
+        if (roundB.queries.length > 0) {
+          webSearchQueries = mergeUniqueQueries(webSearchQueries, roundB.queries);
+        }
+        if (roundB.webSources.length > 0) {
+          webSources = mergeDistinctWebItems(webSources, roundB.webSources, 7);
+        }
+        publishThoughts();
+      }
+
+      // Stage 3: Adversarial Verification, Contradictions & Conversation Continuity Check
+      if (!params.signal?.aborted && (round2CleanAnalysis || isFollowUp)) {
+        const updatedCandidates = mergeCandidateSources(archiveSources, webSources);
+        const updatedPoolBlocks = splitFormattedCandidateBlocks(updatedCandidates);
+        const poolTextB = [updatedPoolBlocks.archiveBlock, updatedPoolBlocks.webContext]
+          .filter(Boolean)
+          .join('\n\n');
+
+        const critiquePass = await this.streamDeliberationPass({
+          params,
+          messages: buildPass3CritiqueMessages({
+            plan,
+            query: params.query,
+            history: params.history,
+            round2Analysis: round2CleanAnalysis || plan.coreQuestion,
+            candidatePoolBlock: poolTextB,
+          }),
+          reasoningEffort: isFollowUp ? 'high' : 'medium',
+          maxTokens: 1100,
+          temperature: 0.35,
+          onThoughtStream: (live) => {
+            publishThoughts(`**Stress-testing counter-arguments & context**\n\n${live}`);
+          },
+        });
+        round3Critique = critiquePass.summary;
+        if (critiquePass.display) {
+          thoughtSections.push(`**Stress-testing counter-arguments & context**\n\n${critiquePass.display}`);
+          publishThoughts();
+        }
+      }
+    }
+
+    const candidates = mergeCandidateSources(archiveSources, webSources);
+    const formatted = splitFormattedCandidateBlocks(candidates);
+    const { continuityBrief, reasoningSynthesis } = buildFinalContinuityBrief({
+      plan,
+      isFollowUp,
+      round2Analysis: round2CleanAnalysis,
+      round3Critique,
+      hasCandidates: candidates.length > 0,
+    });
+
+    return {
+      candidates,
+      archiveBlock: formatted.archiveBlock,
+      webContext: formatted.webContext,
+      archiveSources: formatted.archiveCandidates,
+      webSources: formatted.webCandidates,
+      webSearchQueries,
+      accumulatedThoughts: sanitizeThinkingTrace(thoughtSections.join('\n\n---\n\n'), true),
+      continuityBrief,
+      reasoningSynthesis,
+    };
+  }
+
   private async generateOpenSourceReply(
     params: StreamGenerateParams,
     tier: 'oss-reasoning' | 'oss-fast',
@@ -259,36 +707,33 @@ class AviLLMService {
     const openRouterKey = params.openRouterApiKey?.trim();
     const proxyUrl = resolveEffectiveProxyUrl(params.proxyUrl);
 
-  if (!proxyUrl && !groqKey && !openRouterKey) {
+    if (!proxyUrl && !groqKey && !openRouterKey) {
       throw new BackendNotConfiguredError(
         'No live server endpoint is configured here. Open Admin API Settings to save your free Groq or OpenRouter key to the live website server.'
       );
     }
 
-    let webSearchQueries: string[] = [];
-    let webSources: WebSource[] = [];
-    let liveWebContext = '';
-
-    if (params.webSearchEnabled) {
-      const fallback = await fetchOpenWebFallback(params.query, params.signal);
-      if (fallback.queries.length > 0) webSearchQueries = fallback.queries;
-      if (fallback.webSources.length > 0) {
-        webSources = fallback.webSources;
-        liveWebContext = fallback.contextBlock;
-      }
-    }
+    const pipelineStartedAt = Date.now();
+    const delib = await this.runIterativeDeliberation({
+      params,
+      initialSources: sources,
+      deepReasoning: tier === 'oss-reasoning',
+      pipelineStartedAt,
+    });
 
     const attachedPromptBlock = resolveAttachedPromptBlock(params);
     const hasDirectKey = Boolean(groqKey || openRouterKey);
+    const historyTurns = buildConversationWindow(params.history, 18, 20000);
     const buildDirectOpenAIMessages = () => {
       const systemInstruction = buildAviSystemPrompt(
         params.voiceStyle,
-        sources,
+        delib.archiveSources,
         attachedPromptBlock,
         false,
-        liveWebContext
+        delib.webContext,
+        delib.continuityBrief,
+        delib.reasoningSynthesis
       );
-      const historyTurns = buildConversationWindow(params.history, 14, 14000);
       return [
         { role: 'system' as const, content: systemInstruction },
         ...historyTurns.map((m) => ({
@@ -299,8 +744,8 @@ class AviLLMService {
       ];
     };
     const openAIMessages = hasDirectKey ? buildDirectOpenAIMessages() : [];
-    const historyTurns = buildConversationWindow(params.history, 14, 14000);
-    const temperature = params.voiceStyle === 'academic' ? 0.5 : 0.75;
+    const temperature = params.voiceStyle === 'academic' ? 0.5 : 0.72;
+    const finalReasoningEffort = tier === 'oss-fast' ? 'low' : 'medium';
 
     let lastProvider = 'Open-Source API';
     let lastStatus = 502;
@@ -326,9 +771,9 @@ class AviLLMService {
         };
         if (providerKind === 'groq' && model.startsWith('openai/gpt-oss')) {
           payload.reasoning_format = 'parsed';
-          payload.reasoning_effort = tier === 'oss-fast' ? 'low' : 'high';
+          payload.reasoning_effort = finalReasoningEffort;
         } else if (providerKind === 'openrouter' && tier !== 'oss-fast') {
-          payload.reasoning = { effort: 'high' };
+          payload.reasoning = { effort: finalReasoningEffort };
         }
 
         const res = await fetch(endpoint, {
@@ -348,10 +793,11 @@ class AviLLMService {
             protocol: 'openai',
             engineUsed: params.engineId,
             modelLabel: formatOpenModelLabel(model, providerName),
-            sources,
+            candidateSources: delib.candidates,
             retrievalMs,
-            initialQueries: webSearchQueries,
-            initialWebSources: webSources,
+            initialQueries: delib.webSearchQueries,
+            accumulatedPrefixThoughts: delib.accumulatedThoughts,
+            pipelineStartedAt,
             onUpdate: params.onUpdate,
           });
         }
@@ -416,9 +862,13 @@ class AviLLMService {
         signal: params.signal,
         body: JSON.stringify({
           mode: tier,
+          phase: 'final',
+          reasoningEffort: finalReasoningEffort,
           voiceStyle: params.voiceStyle,
-          archiveBlock: formatArchiveRefsBlock(sources),
-          webContext: liveWebContext,
+          archiveBlock: delib.archiveBlock,
+          webContext: delib.webContext,
+          continuityBrief: delib.continuityBrief,
+          reasoningSynthesis: delib.reasoningSynthesis,
           attachedContext: attachedPromptBlock ?? '',
           contents,
           enableSearch: params.webSearchEnabled,
@@ -433,10 +883,11 @@ class AviLLMService {
           protocol: protocolHeader === 'gemini' ? 'gemini' : 'openai',
           engineUsed: params.engineId,
           modelLabel: modelHeader || 'Open-Source Cloud Proxy',
-          sources,
+          candidateSources: delib.candidates,
           retrievalMs,
-          initialQueries: webSearchQueries,
-          initialWebSources: webSources,
+          initialQueries: delib.webSearchQueries,
+          accumulatedPrefixThoughts: delib.accumulatedThoughts,
+          pipelineStartedAt,
           onUpdate: params.onUpdate,
         });
       }
@@ -494,7 +945,15 @@ class AviLLMService {
       );
     }
 
-    const historyTurns = buildConversationWindow(params.history, 14, 16000);
+    const pipelineStartedAt = Date.now();
+    const delib = await this.runIterativeDeliberation({
+      params,
+      initialSources: sources,
+      deepReasoning: true,
+      pipelineStartedAt,
+    });
+
+    const historyTurns = buildConversationWindow(params.history, 20, 22000);
     const contents = [
       ...historyTurns.map((m) => ({
         role: m.role === 'assistant' ? ('model' as const) : ('user' as const),
@@ -504,18 +963,17 @@ class AviLLMService {
     ];
 
     const temperature = params.voiceStyle === 'academic' ? 0.5 : 0.78;
-    let webSearchQueries: string[] = [];
-    let webSources: WebSource[] = [];
-    let liveWebContext = '';
     let activeModelId = primaryModelId;
 
     const buildInstruction = () =>
       buildAviSystemPrompt(
         params.voiceStyle,
-        sources,
+        delib.archiveSources,
         resolveAttachedPromptBlock(params),
         false,
-        liveWebContext
+        delib.webContext,
+        delib.continuityBrief,
+        delib.reasoningSynthesis
       );
 
     let response: Response | null = null;
@@ -526,24 +984,6 @@ class AviLLMService {
     if (directKey) {
       const fingerprint = getKeyFingerprint(directKey);
       let nativeSearchAllowed = params.webSearchEnabled && !keysWithoutNativeSearch.has(fingerprint);
-      let fetchedOpenWeb = false;
-
-      const ensureOpenWebFallback = async () => {
-        if (fetchedOpenWeb || !params.webSearchEnabled) return;
-        fetchedOpenWeb = true;
-        const fallback = await fetchOpenWebFallback(params.query, params.signal);
-        if (fallback.queries.length > 0) {
-          webSearchQueries = mergeUniqueQueries(webSearchQueries, fallback.queries);
-        }
-        if (fallback.webSources.length > 0) {
-          webSources = mergeUniqueWebSources(webSources, fallback.webSources);
-          liveWebContext = fallback.contextBlock;
-        }
-      };
-
-      if (params.webSearchEnabled && !nativeSearchAllowed) {
-        await ensureOpenWebFallback();
-      }
 
       const sendDirectRequest = (modelId: string, withNativeSearch: boolean) => {
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
@@ -590,7 +1030,6 @@ class AviLLMService {
         if (nativeSearchAllowed && (lastStatus === 429 || lastStatus === 403 || lastStatus === 400)) {
           nativeSearchAllowed = false;
           keysWithoutNativeSearch.add(fingerprint);
-          await ensureOpenWebFallback();
           response = await sendDirectRequest(candidate, false);
           if (response.ok && response.body) break;
 
@@ -617,10 +1056,13 @@ class AviLLMService {
         signal: params.signal,
         body: JSON.stringify({
           mode: 'google',
+          phase: 'final',
           model: primaryModelId,
           voiceStyle: params.voiceStyle,
-          archiveBlock: formatArchiveRefsBlock(sources),
-          webContext: liveWebContext,
+          archiveBlock: delib.archiveBlock,
+          webContext: delib.webContext,
+          continuityBrief: delib.continuityBrief,
+          reasoningSynthesis: delib.reasoningSynthesis,
           attachedContext: resolveAttachedPromptBlock(params) ?? '',
           contents,
           thinkingBudget,
@@ -668,10 +1110,11 @@ class AviLLMService {
       protocol: protocolHeader === 'openai' ? 'openai' : 'gemini',
       engineUsed: params.engineId,
       modelLabel: resolvedModelLabel,
-      sources,
+      candidateSources: delib.candidates,
       retrievalMs,
-      initialQueries: webSearchQueries,
-      initialWebSources: webSources,
+      initialQueries: delib.webSearchQueries,
+      accumulatedPrefixThoughts: delib.accumulatedThoughts,
+      pipelineStartedAt,
       onUpdate: params.onUpdate,
     });
   }
@@ -682,15 +1125,38 @@ class AviLLMService {
     retrievalMs: number
   ): Promise<StreamGenerateResult> {
     const cfg = params.customApi!;
+    const pipelineStartedAt = Date.now();
+    let webSources: WebSource[] = [];
+    let webSearchQueries: string[] = [];
+
+    if (params.webSearchEnabled) {
+      const research = await fetchTargetedWebResearch([params.query], {
+        userSignal: params.signal,
+        maxSources: 5,
+        timeoutMs: 5000,
+      });
+      webSources = research.webSources;
+      webSearchQueries = research.queries;
+    }
+
+    const candidates = mergeCandidateSources(sources, webSources);
+    const formatted = splitFormattedCandidateBlocks(candidates);
+    const continuityBrief =
+      params.history.length > 0
+        ? `Respond directly to the user's newest message ("${params.query.trim()}") in continuity with prior turns; do not repeat earlier answers.`
+        : '';
+
     const systemPrompt = buildAviSystemPrompt(
       params.voiceStyle,
-      sources,
+      formatted.archiveCandidates,
       resolveAttachedPromptBlock(params),
-      true
+      true,
+      formatted.webContext,
+      continuityBrief
     );
     const messages = [
       { role: 'system', content: systemPrompt },
-      ...buildConversationWindow(params.history, 10, 10000),
+      ...buildConversationWindow(params.history, 14, 14000),
       { role: 'user', content: params.query },
     ];
 
@@ -723,10 +1189,11 @@ class AviLLMService {
       protocol: 'openai',
       engineUsed: 'custom-api',
       modelLabel: cfg.modelName,
-      sources,
+      candidateSources: candidates,
       retrievalMs,
-      initialQueries: [],
-      initialWebSources: [],
+      initialQueries: webSearchQueries,
+      accumulatedPrefixThoughts: '',
+      pipelineStartedAt,
       onUpdate: params.onUpdate,
     });
   }
@@ -736,29 +1203,37 @@ class AviLLMService {
     protocol: 'gemini' | 'openai';
     engineUsed: EngineId;
     modelLabel: string;
-    sources: RetrievedSource[];
+    candidateSources: CandidateSource[];
     retrievalMs: number;
     initialQueries: string[];
-    initialWebSources: WebSource[];
+    accumulatedPrefixThoughts: string;
+    pipelineStartedAt: number;
     onUpdate: (update: StreamProgressPayload) => void;
   }): Promise<StreamGenerateResult> {
     const reader = opts.response.body!.getReader();
     const decoder = new TextDecoder();
-    const startedAt = Date.now();
+    const startedAt = opts.pipelineStartedAt || Date.now();
     let thinkingEndedAt = 0;
 
     let buffer = '';
     let structuredThoughts = '';
     let rawAnswer = '';
     let webSearchQueries = [...opts.initialQueries];
-    let webSources = [...opts.initialWebSources];
+    let streamWebSources: WebSource[] = [];
+    const supportedGroundedUrls = new Set<string>();
+
+    const mergeThoughts = (pass4Thoughts: string, flush: boolean): string => {
+      const cleanedPass4 = sanitizeThinkingTrace(pass4Thoughts.trimStart(), flush);
+      const prefix = sanitizeThinkingTrace(opts.accumulatedPrefixThoughts.trim(), flush);
+      return [prefix, cleanedPass4].filter(Boolean).join('\n\n---\n\n');
+    };
 
     const computeViewState = (flushPartial = false) => {
       if (opts.protocol === 'openai' && !structuredThoughts && /^\s*<(?:thought|think)\b/i.test(rawAnswer)) {
         const split = splitThinkingAndAnswer(rawAnswer);
         const isThinkingNow = split.answer.length === 0;
         return {
-          thoughts: sanitizeThinkingTrace(split.thinking, flushPartial || !isThinkingNow),
+          thoughts: mergeThoughts(split.thinking, flushPartial || !isThinkingNow),
           answer: split.answer,
           isThinking: isThinkingNow,
         };
@@ -769,7 +1244,7 @@ class AviLLMService {
           : rawAnswer;
       const isThinkingNow = cleanAnswer.length === 0;
       return {
-        thoughts: sanitizeThinkingTrace(structuredThoughts.trimStart(), flushPartial || !isThinkingNow),
+        thoughts: mergeThoughts(structuredThoughts, flushPartial || !isThinkingNow),
         answer: cleanAnswer,
         isThinking: isThinkingNow,
       };
@@ -780,13 +1255,21 @@ class AviLLMService {
       if (state.answer.length > 0 && !thinkingEndedAt) {
         thinkingEndedAt = Date.now();
       }
+      const grounded =
+        supportedGroundedUrls.size > 0
+          ? streamWebSources.filter((ws) => supportedGroundedUrls.has(ws.url))
+          : [];
+      const liveAligned = state.answer
+        ? alignCitedSources(state.answer, opts.candidateSources, grounded)
+        : null;
+
       opts.onUpdate({
-        content: state.answer,
+        content: liveAligned ? liveAligned.content : state.answer,
         thoughts: state.thoughts,
         isThinking: state.isThinking,
         thinkingMs: (thinkingEndedAt || Date.now()) - startedAt,
         webSearchQueries,
-        webSources,
+        webSources: liveAligned ? liveAligned.webSources : [],
       });
     };
 
@@ -810,7 +1293,13 @@ class AviLLMService {
         changed = true;
       }
       if (delta.webSources.length > 0) {
-        webSources = mergeUniqueWebSources(webSources, delta.webSources);
+        streamWebSources = mergeDistinctWebItems(streamWebSources, delta.webSources, 12);
+        changed = true;
+      }
+      if (delta.groundedChunkUrls.length > 0) {
+        for (const u of delta.groundedChunkUrls) {
+          supportedGroundedUrls.add(u);
+        }
         changed = true;
       }
       return changed;
@@ -846,19 +1335,24 @@ class AviLLMService {
 
     const finalState = computeViewState(true);
     const finalThinkingMs = (thinkingEndedAt || Date.now()) - startedAt;
+    const extraGrounded =
+      supportedGroundedUrls.size > 0
+        ? streamWebSources.filter((ws) => supportedGroundedUrls.has(ws.url))
+        : [];
+    const aligned = alignCitedSources(finalState.answer, opts.candidateSources, extraGrounded);
 
     return {
-      content: finalState.answer,
+      content: aligned.content,
       thoughts: finalState.thoughts,
       isThinking: false,
       thinkingMs: finalThinkingMs,
       webSearchQueries,
-      webSources,
+      webSources: aligned.webSources,
       engineUsed: opts.engineUsed,
       modelLabel: opts.modelLabel,
-      sources: opts.sources,
+      sources: aligned.sources,
       retrievalMs: opts.retrievalMs,
-      followUps: deriveFollowUps(opts.sources, webSources, finalState.answer),
+      followUps: deriveCitedFollowUps(aligned.sources, aligned.webSources, aligned.content),
     };
   }
 }

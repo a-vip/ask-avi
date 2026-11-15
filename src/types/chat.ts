@@ -43,6 +43,7 @@ export interface WebSource {
   index: number;
   title: string;
   url: string;
+  snippet?: string;
 }
 
 export type AttachedContextKind = 'dossier' | 'pdf' | 'doc' | 'slides' | 'link' | 'text';

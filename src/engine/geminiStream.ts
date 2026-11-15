@@ -5,6 +5,7 @@ export interface GeminiChunkDelta {
   answerDelta: string;
   webSearchQueries: string[];
   webSources: WebSource[];
+  groundedChunkUrls: string[];
 }
 
 interface RawGeminiPart {
@@ -19,6 +20,10 @@ interface RawGroundingChunk {
   };
 }
 
+interface RawGroundingSupport {
+  groundingChunkIndices?: number[];
+}
+
 interface RawGeminiCandidate {
   content?: {
     parts?: RawGeminiPart[];
@@ -26,6 +31,7 @@ interface RawGeminiCandidate {
   groundingMetadata?: {
     webSearchQueries?: string[];
     groundingChunks?: RawGroundingChunk[];
+    groundingSupports?: RawGroundingSupport[];
   };
 }
 
@@ -39,6 +45,7 @@ export function extractGeminiChunkDelta(payloadJson: string): GeminiChunkDelta {
     answerDelta: '',
     webSearchQueries: [],
     webSources: [],
+    groundedChunkUrls: [],
   };
 
   let parsed: RawGeminiChunk;
@@ -70,11 +77,22 @@ export function extractGeminiChunkDelta(payloadJson: string): GeminiChunkDelta {
       }
     }
     if (Array.isArray(meta.groundingChunks)) {
+      const supportedIndices = new Set<number>();
+      if (Array.isArray(meta.groundingSupports)) {
+        for (const sup of meta.groundingSupports) {
+          for (const idx of sup.groundingChunkIndices ?? []) {
+            if (typeof idx === 'number') supportedIndices.add(idx);
+          }
+        }
+      }
       meta.groundingChunks.forEach((chunk, idx) => {
         const uri = chunk.web?.uri?.trim();
         const title = chunk.web?.title?.trim() || uri;
         if (uri && title) {
           out.webSources.push({ index: idx + 1, title, url: uri });
+          if (supportedIndices.has(idx)) {
+            out.groundedChunkUrls.push(uri);
+          }
         }
       });
     }
@@ -106,6 +124,7 @@ export function extractOpenAIChunkDelta(payloadJson: string): GeminiChunkDelta {
     answerDelta: '',
     webSearchQueries: [],
     webSources: [],
+    groundedChunkUrls: [],
   };
 
   let parsed: RawOpenAIChunk;

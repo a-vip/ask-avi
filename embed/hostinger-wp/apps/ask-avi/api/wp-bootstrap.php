@@ -94,9 +94,10 @@ function ask_avi_default_master_prompt(): string {
     '',
     'Method & Voice:',
     '- Think slowly and deeply from first principles: unpack definitions, surface unstated premises, stress-test strongest counter-arguments, trace downstream failure modes, and draw structural connections across philosophy, mathematics, computation, neuroscience, and law.',
+    '- In multi-turn conversations, examine the full arc of prior prompts and replies, resolve follow-ups against what was already discussed, and engage directly with the new point or tension instead of restarting earlier answers.',
     '- Keep any preparatory thinking wholly immersed in the substance of the problem — ideas, definitions, evidence, causal links, and counter-arguments.',
     '- Reply candidly, incisively, and warmly in British English across any subject — world events, philosophy, law, software engineering, career decisions, mathematics, or life — using live web findings when current facts matter, never stitching canned passages from old essays.',
-    '- Fold genuinely relevant archive references in quietly as [1], [2] without inventing details. Only when asked directly about consulting, briefings, or contact, share https://calendly.com/aviperera/free-consultation or workwithavip@gmail.com briefly.',
+    '- Cite genuinely relied-upon numbered sources inline cleanly as [1], [2] without inventing details or stretching tangential matches. Only when asked directly about consulting, briefings, or contact, share https://calendly.com/aviperera/free-consultation or workwithavip@gmail.com briefly.',
   ]);
 }
 
@@ -127,8 +128,15 @@ function ask_avi_assemble_system_prompt(
   string $archiveBlock,
   string $webContext,
   string $attachedContext,
-  bool $isAuthenticated
+  bool $isAuthenticated,
+  string $continuityBrief = '',
+  string $reasoningSynthesis = '',
+  string $phase = 'final'
 ): string {
+  if ($phase === 'deliberate') {
+    return 'Engage deeply in pure domain analysis from first principles. Weigh definitions, evidence, counter-arguments, contradictions, and conversation trajectory directly without commentary on instructions or tone.';
+  }
+
   $basePrompt = trim($masterPromptOverride);
   if ($basePrompt === '') {
     $basePrompt = ask_avi_default_master_prompt();
@@ -138,6 +146,8 @@ function ask_avi_assemble_system_prompt(
   $styleDirective = ask_avi_voice_style_directive($voiceStyle);
   $archive = ask_avi_clip_utf8(trim($archiveBlock), 6000);
   $web = ask_avi_clip_utf8(trim($webContext), 6000);
+  $continuity = ask_avi_clip_utf8(trim($continuityBrief), 1800);
+  $synthesis = ask_avi_clip_utf8(trim($reasoningSynthesis), 4800);
   $maxAttached = $isAuthenticated ? 12000 : 8000;
   $attachedRaw = ask_avi_clip_utf8(trim($attachedContext), $maxAttached);
   $attachedBlock = '';
@@ -152,11 +162,17 @@ function ask_avi_assemble_system_prompt(
     '',
     'REGISTER: ' . $styleDirective,
   ];
+  if ($continuity !== '') {
+    $parts[] = "\nCONVERSATION CONTINUITY & CITATIONS:\n" . $continuity;
+  }
   if ($archive !== '') {
     $parts[] = "\nRELEVANT ARCHIVE REFERENCES:\n" . $archive;
   }
   if ($web !== '') {
     $parts[] = "\n" . $web;
+  }
+  if ($synthesis !== '') {
+    $parts[] = "\nINTERNAL WORKING NOTES (weave these substantive conclusions into your own natural first-person reply — NEVER echo meta-headings such as \"Stage 2\", \"Stage 3\", or \"Critical Synthesis\"):\n" . $synthesis;
   }
   if ($attachedBlock !== '') {
     $parts[] = "\n" . $attachedBlock;
@@ -355,9 +371,12 @@ function ask_avi_record_chat_telemetry(?array $user, int $statusCode, ?string $m
   if (!isset($wpdb)) {
     return;
   }
+  $ok = $statusCode >= 200 && $statusCode < 400;
+  if ($ok && defined('ASK_AVI_SKIP_OK_TELEMETRY') && ASK_AVI_SKIP_OK_TELEMETRY) {
+    return;
+  }
   ask_avi_ensure_tables();
   $users_table = $wpdb->prefix . 'ask_avi_users';
-  $ok = $statusCode >= 200 && $statusCode < 400;
   $email = $user['email'] ?? 'guest';
   $nowMs = (int) round(microtime(true) * 1000);
 

@@ -93,12 +93,13 @@ const META_REASONING_SENTENCE_RES: RegExp[] = [
   /\bnot\s+invented\s+(?:urls?|dois?|links?)\b/i,
   /\b(?:proper|exact)\s+citation\s+format\b/i,
   /\bcite\s+only\s+from\s+\[\d+\]/i,
-  /\b(?:must|should|need\s+to|we\s+must|i\s+must)\s+(?:be\s+)?(?:candid|incisive|warmly|conversational|unpretentious)\b/i,
+  /\b(?:must|should|need\s+to|we\s+must|i\s+must)\s+(?:be\s+)?(?:candid|incisive|warmly|conversational|unpretentious|concise)\b/i,
+  /\b(?:must|should|need\s+to)\s+(?:explain|respond|answer|write)\s+(?:in\s+the\s+(?:persona|voice)|concisely|clearly|directly\s+in\s+first\s+person)\b/i,
   /\b(?:should\s+incorporate\s+first\s+principles|must\s+think\s+slowly\b.*\bdraw\s+(?:structural\s+)?connections|draw\s+(?:structural\s+)?connections\s+across\s+philosophy)\b/i,
   /\b(?:live\s+web\s+findings\s+when\s+current\s+facts\s+matter|canned\s+passages\s+from\s+old\s+essays)\b/i,
-  /\b(?:use|fold|reference)\s+archive\s+references?\b/i,
+  /\b(?:use|fold|reference|weave\s+in|integrate)\s+(?:relevant\s+)?archive\s+references?\b/i,
   /^\s*no\s+invented\s+details\.?\s*$/i,
-  /\breflect(?:ing)?\s+(?:Avi(?:\s+Perera)?(?:'s)?|his)\s+(?:background|voice|method|style|identity)\b/i,
+  /\breflect(?:ing)?\s+(?:Avi(?:\s+Perera)?(?:'s)?|his)\s+(?:background|voice|method|style|identity|perspective|worldview)\b/i,
   /\bfake\s+(?:archive\s+)?citations?\b/i,
   /\b(?:showing\s+off|listing\s+my\s+cv)\b/i,
   /\bsince\s+no\s+archive\s+references\s+were\s+passed\b/i,
@@ -108,10 +109,14 @@ const META_REASONING_SENTENCE_RES: RegExp[] = [
   /\bmust\s+reason\s+in\s+first\s+person\b/i,
   /\balways\s+check\s+facts\.\s*$/i,
   /^\s*(?:will|must|should|also\s+need\s+to|we\s+need\s+to)\s+(?:not\s+)?fabricate\b/i,
+  /\b(?:the\s+user\s+(?:is\s+asking|asks)\s*:?\s*["“])/i,
+  /\bnotice\s+how\s+this\s+(?:matches|resonates\s+with)\s+(?:my|Avi(?:'s)?)\s+(?:background|themes|work)\b/i,
+  /\bwill\s+(?:produce|adopt|write)\s+(?:a\s+)?(?:well[- ]considered|conversational|candid|first[- ]person)\b/i,
+  /\bfirst[- ]person\s+voice\b|\bdirect(?:ly)?\s+in\s+first\s+person\b|\bno\s+(?:robotic|meta)\b/i,
 ];
 
 const PENDING_META_PREFIX_RE =
-  /^(?:they\s+want|we\s+(?:have\s+to|need\s+to\s+(?:follow|respond|keep|comply)|should\s+not|also\s+need|must)|i\s+(?:need|should|must)\s+(?:to\s+)?(?:use|cite|keep|answer|respond|comply|adopt|produce)|as\s+per\b|per\s+developer|developer\s+inst|system\s+inst|make\s+sure\s+british|use\s+["']?i["']?|use\s+(?:live\s+web\s+findings|archive\s+references)|no\s+(?:cosplay|invented\s+details)|comply\s+with|now\s+(?:to\s+comply|produce\s+final)|calendly|will\s+(?:adopt|not\s+fabricate|use\s+["']?i["']?)|must\s+(?:avoid\s+meta|not\s+(?:mention|give\s+a?\s*canned|provide\s+any\s+disallowed|fabricate)|reason\s+in\s+first|think\s+slowly|be\s+candid)|also\s+incorporate\s+his|provide\s+citations|then\s+(?:the\s+)?answer\s+should|proper\s+citation)/i;
+  /^(?:they\s+want|the\s+user\s+(?:asks|is\s+asking|wants)|we\s+(?:have\s+to|need\s+to\s+(?:follow|respond|keep|comply|weave)|should\s+(?:not|incorporate)|also\s+need|must)|i\s+(?:need|should|must)\s+(?:to\s+)?(?:use|cite|keep|answer|respond|comply|adopt|produce)|as\s+per\b|per\s+developer|developer\s+inst|system\s+inst|make\s+sure\s+british|use\s+["']?i["']?|use\s+(?:live\s+web\s+findings|archive\s+references)|no\s+(?:cosplay|invented\s+details|robotic)|comply\s+with|now\s+(?:to\s+comply|produce\s+final)|calendly|will\s+(?:adopt|not\s+fabricate|produce|write|use\s+["']?i["']?)|must\s+(?:avoid\s+meta|not\s+(?:mention|give\s+a?\s*canned|provide\s+any\s+disallowed|fabricate)|reason\s+in\s+first|think\s+slowly|be\s+candid|explain)|also\s+incorporate\s+his|provide\s+citations|then\s+(?:the\s+)?answer\s+should|proper\s+citation|notice\s+how\s+this)/i;
 
 const ABBREV_END_RE = /\b(?:e\.g|i\.e|et\s+al|cf|vs|v|Dr|Mr|Ms|Mrs|Prof|U\.S|U\.K|etc)\.$/i;
 

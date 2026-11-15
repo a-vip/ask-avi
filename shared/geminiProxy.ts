@@ -102,10 +102,13 @@ interface ContentTurn {
 
 interface ChatRequestPayload {
   mode?: 'oss-reasoning' | 'oss-fast' | 'google';
+  phase?: 'deliberate' | 'final';
   model?: string;
   systemInstruction?: string;
   contents?: ContentTurn[];
   thinkingBudget?: number;
+  reasoningEffort?: 'low' | 'medium' | 'high';
+  maxTokens?: number;
   enableSearch?: boolean;
   temperature?: number;
 }
@@ -165,7 +168,7 @@ async function tryOpenAICompatibleUpstream(params: {
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   temperature: number;
   maxTokens?: number;
-  deepReasoning?: boolean;
+  reasoningEffort?: 'low' | 'medium' | 'high' | false;
   signal: AbortSignal;
 }): Promise<{ ok: true; result: UpstreamResult } | { ok: false; status: number; error: string }> {
   let lastStatus = 502;
@@ -188,11 +191,12 @@ async function tryOpenAICompatibleUpstream(params: {
       temperature: params.temperature,
       max_tokens: params.maxTokens ?? 4096,
     };
+    const effort = params.reasoningEffort === false ? 'low' : params.reasoningEffort ?? 'high';
     if (params.provider === 'groq' && model.startsWith('openai/gpt-oss')) {
       payload.reasoning_format = 'parsed';
-      payload.reasoning_effort = params.deepReasoning === false ? 'low' : 'high';
-    } else if (params.provider === 'openrouter' && params.deepReasoning) {
-      payload.reasoning = { effort: 'high' };
+      payload.reasoning_effort = effort;
+    } else if (params.provider === 'openrouter' && params.reasoningEffort !== false) {
+      payload.reasoning = { effort };
     }
 
     const res = await fetch(params.endpoint, {
@@ -437,8 +441,21 @@ export async function handleGeminiProxyRequest(
 
   // 2. Completely Free Open-Source Provider Cascade (Groq -> OpenRouter :free -> Workers AI)
   const isFastOss = mode === 'oss-fast';
-  const ossMaxTokens = isFastOss ? 4096 : 8192;
-  const deepReasoning = !isFastOss;
+  const requestedEffort =
+    body.reasoningEffort === 'low' ||
+    body.reasoningEffort === 'medium' ||
+    body.reasoningEffort === 'high'
+      ? body.reasoningEffort
+      : undefined;
+  const ossMaxTokens =
+    typeof body.maxTokens === 'number' && Number.isFinite(body.maxTokens)
+      ? Math.max(256, Math.min(8192, Math.round(body.maxTokens)))
+      : isFastOss
+        ? 4096
+        : 8192;
+  const ossEffort: 'low' | 'medium' | 'high' | false = isFastOss
+    ? 'low'
+    : requestedEffort ?? 'high';
 
   if (groqKey) {
     const groq = await tryOpenAICompatibleUpstream({
@@ -449,7 +466,7 @@ export async function handleGeminiProxyRequest(
       messages: openAIMessages,
       temperature,
       maxTokens: ossMaxTokens,
-      deepReasoning,
+      reasoningEffort: ossEffort,
       signal: request.signal,
     });
     if (groq.ok) return buildSseResponse(groq.result, corsHeaders);
@@ -466,7 +483,7 @@ export async function handleGeminiProxyRequest(
       messages: openAIMessages,
       temperature,
       maxTokens: ossMaxTokens,
-      deepReasoning,
+      reasoningEffort: ossEffort,
       signal: request.signal,
     });
     if (or.ok) return buildSseResponse(or.result, corsHeaders);

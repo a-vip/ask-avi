@@ -212,7 +212,9 @@ export function buildAviSystemPrompt(
   sources: RetrievedSource[],
   attachedSnippet?: string,
   useInlineThoughtTags = false,
-  liveWebContext?: string
+  liveWebContext?: string,
+  continuityBrief?: string,
+  reasoningSynthesis?: string
 ): string {
   const styleMeta = VOICE_STYLES.find((s) => s.id === voiceStyle) ?? VOICE_STYLES[0];
   const conciseRefs = formatArchiveRefsBlock(sources);
@@ -225,6 +227,12 @@ export function buildAviSystemPrompt(
     : '';
 
   const webBlock = liveWebContext?.trim() ? `\n\n${liveWebContext.trim()}` : '';
+  const continuityBlock = continuityBrief?.trim()
+    ? `\nCONVERSATION CONTINUITY & CITATIONS:\n${continuityBrief.trim().slice(0, 1600)}`
+    : '';
+  const synthesisBlock = reasoningSynthesis?.trim()
+    ? `\nDISTILLED MULTI-ANGLE NOTES (build cleanly on these insights in your reply):\n${reasoningSynthesis.trim().slice(0, 4200)}`
+    : '';
 
   return [
     `You are Avi Perera, speaking directly with visitors on Ask Avi (aviperera.com).`,
@@ -236,15 +244,18 @@ export function buildAviSystemPrompt(
     `- Register (${styleMeta.label}): ${styleMeta.directive} Write naturally in British English.`,
     ``,
     `REASONING & DIALOGUE:`,
-    `- Deliberate deeply on the substance, definitions, causal mechanisms, and tensions of the question, keeping preparatory thinking absorbed in the ideas themselves.`,
-    `- Reply naturally in British English, never regurgitate archive paragraphs, integrate helpful archive references quietly as [1], [2] without inventing details, and share https://calendly.com/aviperera/free-consultation or workwithavip@gmail.com only when asked about consulting or contact.`,
+    `- Deliberate deeply on the substance, definitions, causal mechanisms, counter-arguments, and tensions of the question, keeping preparatory thinking absorbed in the ideas themselves.`,
+    `- Reply naturally in British English. In ongoing multi-turn dialogues, answer the latest question directly and build forward from prior turns instead of repeating Turn 1.`,
+    `- Integrate genuinely relied-upon numbered references cleanly as [1], [2] without inventing details (omit uncited references), and share https://calendly.com/aviperera/free-consultation or workwithavip@gmail.com only when asked about consulting or contact.`,
     useInlineThoughtTags
       ? `- Place pure domain reasoning inside <thought>...</thought> before your visible answer.`
       : '',
+    continuityBlock,
     conciseRefs
-      ? `\nRELEVANT ARCHIVE REFERENCES (integrate only if genuinely useful):\n${conciseRefs}`
+      ? `\nRELEVANT ARCHIVE REFERENCES (cite inline with [n] only if genuinely relied upon):\n${conciseRefs}`
       : '',
     webBlock,
+    synthesisBlock,
     attachedBlock,
   ]
     .filter(Boolean)

@@ -16,10 +16,14 @@ export const DEFAULT_SERVER_MASTER_PROMPT = [
   ``,
   `Method & Voice:`,
   `- Think slowly and deeply from first principles: unpack definitions, surface unstated premises, stress-test strongest counter-arguments, trace downstream failure modes, and draw structural connections across philosophy, mathematics, computation, neuroscience, and law.`,
+  `- In multi-turn conversations, examine the full arc of prior prompts and replies, resolve follow-ups against what was already discussed, and engage directly with the new point or tension instead of restarting earlier answers.`,
   `- Keep any preparatory thinking wholly immersed in the substance of the problem — ideas, definitions, evidence, causal links, and counter-arguments.`,
   `- Reply candidly, incisively, and warmly in British English across any subject — world events, philosophy, law, software engineering, career decisions, mathematics, or life — using live web findings when current facts matter, never stitching canned passages from old essays.`,
-  `- Fold genuinely relevant archive references in quietly as [1], [2] without inventing details. Only when asked directly about consulting, briefings, or contact, share https://calendly.com/aviperera/free-consultation or workwithavip@gmail.com briefly.`,
+  `- Cite genuinely relied-upon numbered sources inline cleanly as [1], [2] without inventing details or stretching tangential matches. Only when asked directly about consulting, briefings, or contact, share https://calendly.com/aviperera/free-consultation or workwithavip@gmail.com briefly.`,
 ].join('\n');
+
+const DELIBERATE_SYSTEM_PROMPT =
+  'Engage deeply in pure domain analysis from first principles. Weigh definitions, evidence, counter-arguments, contradictions, and conversation trajectory directly without commentary on instructions or tone.';
 
 const VOICE_STYLE_DIRECTIVES: Record<string, string> = {
   standard: 'Conversational, intellectually honest, and unpretentious — clear first-principles analysis without academic stiffness.',
@@ -34,11 +38,18 @@ export interface ServerPromptAssemblyInput {
   archiveBlock?: string;
   webContext?: string;
   attachedContext?: string;
+  continuityBrief?: string;
+  reasoningSynthesis?: string;
+  phase?: 'deliberate' | 'final';
   useInlineThoughtTags?: boolean;
   isAuthenticated?: boolean;
 }
 
 export function assembleServerSystemPrompt(input: ServerPromptAssemblyInput): string {
+  if (input.phase === 'deliberate') {
+    return DELIBERATE_SYSTEM_PROMPT;
+  }
+
   const basePrompt =
     typeof input.masterPromptOverride === 'string' && input.masterPromptOverride.trim()
       ? input.masterPromptOverride.trim()
@@ -57,6 +68,10 @@ export function assembleServerSystemPrompt(input: ServerPromptAssemblyInput): st
 
   const trimmedArchive = typeof input.archiveBlock === 'string' ? input.archiveBlock.trim().slice(0, 6000) : '';
   const trimmedWeb = typeof input.webContext === 'string' ? input.webContext.trim().slice(0, 6000) : '';
+  const trimmedContinuity =
+    typeof input.continuityBrief === 'string' ? input.continuityBrief.trim().slice(0, 1800) : '';
+  const trimmedSynthesis =
+    typeof input.reasoningSynthesis === 'string' ? input.reasoningSynthesis.trim().slice(0, 4800) : '';
 
   return [
     basePrompt,
@@ -65,8 +80,12 @@ export function assembleServerSystemPrompt(input: ServerPromptAssemblyInput): st
     input.useInlineThoughtTags
       ? `Place deep domain reasoning inside <thought>...</thought> before your answer, keeping it strictly focused on the ideas themselves.`
       : '',
+    trimmedContinuity ? `\nCONVERSATION CONTINUITY & CITATIONS:\n${trimmedContinuity}` : '',
     trimmedArchive ? `\nRELEVANT ARCHIVE REFERENCES:\n${trimmedArchive}` : '',
     trimmedWeb ? `\n${trimmedWeb}` : '',
+    trimmedSynthesis
+      ? `\nINTERNAL WORKING NOTES (weave these substantive conclusions into your own natural first-person reply — NEVER echo meta-headings such as "Stage 2", "Stage 3", or "Critical Synthesis"):\n${trimmedSynthesis}`
+      : '',
     attachedBlock,
   ]
     .filter(Boolean)

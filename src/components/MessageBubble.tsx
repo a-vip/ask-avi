@@ -27,6 +27,7 @@ import {
   resolveSourceUrl,
   type CitationTarget,
 } from '../utils/markdown';
+import { sanitizeThinkingTrace } from '../utils/thinking';
 import { AviAvatar } from './AviAvatar';
 
 interface MessageBubbleProps {
@@ -85,10 +86,18 @@ export function MessageBubble({
     return renderMarkdownToSafeHtml(message.content, citationTargets);
   }, [message.role, message.content, citationTargets]);
 
-  const renderedThoughtHtml = useMemo(() => {
+  // Auto-open reasoning timeline while streaming thinking; auto-fold cleanly when answer begins
+  const isActivelyThinking = Boolean(message.isStreaming && message.isThinking && !message.content);
+
+  const sanitizedThoughts = useMemo(() => {
     if (message.role !== 'assistant' || !message.thoughts) return '';
-    return renderMarkdownToSafeHtml(message.thoughts, 0);
-  }, [message.role, message.thoughts]);
+    return sanitizeThinkingTrace(message.thoughts, !isActivelyThinking);
+  }, [message.role, message.thoughts, isActivelyThinking]);
+
+  const renderedThoughtHtml = useMemo(() => {
+    if (!sanitizedThoughts) return '';
+    return renderMarkdownToSafeHtml(sanitizedThoughts, 0);
+  }, [sanitizedThoughts]);
 
   // Live seconds ticker while actively thinking
   useEffect(() => {
@@ -104,10 +113,8 @@ export function MessageBubble({
     return () => window.clearInterval(id);
   }, [message.role, message.isStreaming, message.isThinking, message.createdAt]);
 
-  // Auto-open reasoning timeline while streaming thinking; auto-fold cleanly when answer begins
-  const isActivelyThinking = Boolean(message.isStreaming && message.isThinking && !message.content);
   const hasReasoningBlock = Boolean(
-    message.thoughts?.trim() ||
+    sanitizedThoughts ||
       (message.webSearchQueries && message.webSearchQueries.length > 0) ||
       isActivelyThinking
   );

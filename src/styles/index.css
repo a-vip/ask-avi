@@ -1257,25 +1257,32 @@ a {
 
 .composer-popover-context {
   width: 286px;
-  padding: 8px;
+  padding: 6px;
 }
 
-.popover-context-meta {
-  display: flex;
+.attached-budget-warning {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 4px 8px 6px;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  color: #f59e0b;
   font-size: 0.7rem;
-  color: var(--text-3);
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 4px;
+  font-weight: 500;
 }
 
-.popover-budget-hint {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.64rem;
-  color: var(--text-3);
+.popover-context-warning {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.24);
 }
 
 .popover-unlock-btn {
@@ -1283,10 +1290,10 @@ a {
   background: transparent;
   color: var(--accent);
   font: inherit;
-  font-size: 0.68rem;
-  font-weight: 500;
+  font-size: 0.7rem;
+  font-weight: 600;
   cursor: pointer;
-  padding: 2px 5px;
+  padding: 2px 4px;
   border-radius: 5px;
   transition: background 0.14s, color 0.14s;
 }

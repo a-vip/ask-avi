@@ -1,4 +1,4 @@
-import { buildAviSystemPrompt, ENGINE_OPTIONS } from '../data/persona';
+import { buildAviSystemPrompt, ENGINE_OPTIONS, formatArchiveRefsBlock } from '../data/persona';
 import type {
   AttachedContext,
   ChatMessage,
@@ -9,7 +9,7 @@ import type {
   WebSource,
 } from '../types/chat';
 import { formatContextsForPrompt } from '../utils/contextExtractor';
-import { splitThinkingAndAnswer } from '../utils/thinking';
+import { sanitizeThinkingTrace, splitThinkingAndAnswer } from '../utils/thinking';
 import {
   extractGeminiChunkDelta,
   extractOpenAIChunkDelta,
@@ -278,23 +278,28 @@ class AviLLMService {
       }
     }
 
-    const systemInstruction = buildAviSystemPrompt(
-      params.voiceStyle,
-      sources,
-      resolveAttachedPromptBlock(params),
-      false,
-      liveWebContext
-    );
-
+    const attachedPromptBlock = resolveAttachedPromptBlock(params);
+    const hasDirectKey = Boolean(groqKey || openRouterKey);
+    const buildDirectOpenAIMessages = () => {
+      const systemInstruction = buildAviSystemPrompt(
+        params.voiceStyle,
+        sources,
+        attachedPromptBlock,
+        false,
+        liveWebContext
+      );
+      const historyTurns = buildConversationWindow(params.history, 14, 14000);
+      return [
+        { role: 'system' as const, content: systemInstruction },
+        ...historyTurns.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+        { role: 'user' as const, content: params.query },
+      ];
+    };
+    const openAIMessages = hasDirectKey ? buildDirectOpenAIMessages() : [];
     const historyTurns = buildConversationWindow(params.history, 14, 14000);
-    const openAIMessages = [
-      { role: 'system' as const, content: systemInstruction },
-      ...historyTurns.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
-      { role: 'user' as const, content: params.query },
-    ];
     const temperature = params.voiceStyle === 'academic' ? 0.5 : 0.75;
 
     let lastProvider = 'Open-Source API';
@@ -317,11 +322,13 @@ class AviLLMService {
           messages: openAIMessages,
           stream: true,
           temperature,
-          max_tokens: 4096,
+          max_tokens: tier === 'oss-fast' ? 4096 : 8192,
         };
         if (providerKind === 'groq' && model.startsWith('openai/gpt-oss')) {
           payload.reasoning_format = 'parsed';
-          payload.reasoning_effort = 'high';
+          payload.reasoning_effort = tier === 'oss-fast' ? 'low' : 'high';
+        } else if (providerKind === 'openrouter' && tier !== 'oss-fast') {
+          payload.reasoning = { effort: 'high' };
         }
 
         const res = await fetch(endpoint, {
@@ -409,7 +416,10 @@ class AviLLMService {
         signal: params.signal,
         body: JSON.stringify({
           mode: tier,
-          systemInstruction,
+          voiceStyle: params.voiceStyle,
+          archiveBlock: formatArchiveRefsBlock(sources),
+          webContext: liveWebContext,
+          attachedContext: attachedPromptBlock ?? '',
           contents,
           enableSearch: params.webSearchEnabled,
           temperature,
@@ -539,13 +549,14 @@ class AviLLMService {
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
           modelId
         )}:streamGenerateContent?alt=sse`;
+        const maxGeminiOutput = opt.id === 'gemini-pro' || thinkingBudget >= 20000 ? 32768 : 16384;
         const bodyPayload: Record<string, unknown> = {
           systemInstruction: { parts: [{ text: buildInstruction() }] },
           contents,
           generationConfig: {
             temperature,
             topP: 0.92,
-            maxOutputTokens: 8192,
+            maxOutputTokens: maxGeminiOutput,
             thinkingConfig: {
               includeThoughts: true,
               thinkingBudget,
@@ -607,7 +618,10 @@ class AviLLMService {
         body: JSON.stringify({
           mode: 'google',
           model: primaryModelId,
-          systemInstruction: buildInstruction(),
+          voiceStyle: params.voiceStyle,
+          archiveBlock: formatArchiveRefsBlock(sources),
+          webContext: liveWebContext,
+          attachedContext: resolveAttachedPromptBlock(params) ?? '',
           contents,
           thinkingBudget,
           enableSearch: params.webSearchEnabled,
@@ -739,28 +753,30 @@ class AviLLMService {
     let webSearchQueries = [...opts.initialQueries];
     let webSources = [...opts.initialWebSources];
 
-    const computeViewState = () => {
+    const computeViewState = (flushPartial = false) => {
       if (opts.protocol === 'openai' && !structuredThoughts && /^\s*<(?:thought|think)\b/i.test(rawAnswer)) {
         const split = splitThinkingAndAnswer(rawAnswer);
+        const isThinkingNow = split.answer.length === 0;
         return {
-          thoughts: split.thinking,
+          thoughts: sanitizeThinkingTrace(split.thinking, flushPartial || !isThinkingNow),
           answer: split.answer,
-          isThinking: split.answer.length === 0,
+          isThinking: isThinkingNow,
         };
       }
       const cleanAnswer =
         opts.protocol === 'openai'
           ? rawAnswer.replace(/<\/?(?:thought|think)\b[^>]*>/gi, '').replace(/^\s+/, '')
           : rawAnswer;
+      const isThinkingNow = cleanAnswer.length === 0;
       return {
-        thoughts: structuredThoughts.trimStart(),
+        thoughts: sanitizeThinkingTrace(structuredThoughts.trimStart(), flushPartial || !isThinkingNow),
         answer: cleanAnswer,
-        isThinking: cleanAnswer.length === 0,
+        isThinking: isThinkingNow,
       };
     };
 
     const emitCurrent = () => {
-      const state = computeViewState();
+      const state = computeViewState(false);
       if (state.answer.length > 0 && !thinkingEndedAt) {
         thinkingEndedAt = Date.now();
       }
@@ -828,7 +844,7 @@ class AviLLMService {
       }
     }
 
-    const finalState = computeViewState();
+    const finalState = computeViewState(true);
     const finalThinkingMs = (thinkingEndedAt || Date.now()) - startedAt;
 
     return {

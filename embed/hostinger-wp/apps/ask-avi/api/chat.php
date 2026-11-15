@@ -31,13 +31,17 @@ $mode = (string) ($body['mode'] ?? 'oss-reasoning');
 $temperature = isset($body['temperature']) ? (float) $body['temperature'] : 0.72;
 $temperature = max(0.0, min(1.3, $temperature));
 $isAuthenticated = ($reqUser !== null);
-$maxSystemChars = $isAuthenticated ? 18000 : 10500;
-$systemInstruction = trim((string) ($body['systemInstruction'] ?? ''));
-if (function_exists('mb_substr')) {
-  $systemInstruction = mb_substr($systemInstruction, 0, $maxSystemChars, 'UTF-8');
-} else {
-  $systemInstruction = substr($systemInstruction, 0, $maxSystemChars);
-}
+
+// Master Prompt & Reasoning Policy live strictly on the backend (WP Admin configurable).
+// Untrusted client payloads never override the Master Prompt directly.
+$systemInstruction = ask_avi_assemble_system_prompt(
+  (string) ($settings['master_prompt'] ?? ''),
+  (string) ($body['voiceStyle'] ?? 'standard'),
+  (string) ($body['archiveBlock'] ?? ''),
+  (string) ($body['webContext'] ?? ''),
+  (string) ($body['attachedContext'] ?? ''),
+  $isAuthenticated
+);
 
 function ask_avi_clip_text(string $text, int $limit): string {
   if (function_exists('mb_substr')) {
@@ -226,7 +230,7 @@ if ($mode === 'google') {
     'gemini-flash-lite-latest',
   ]));
 
-  $budget = max(1024, min(24576, (int) ($body['thinkingBudget'] ?? 8192)));
+  $budget = max(1024, min(24576, (int) ($body['thinkingBudget'] ?? 12288)));
   $searchAllowed = (($body['enableSearch'] ?? true) !== false);
 
   $lastStatus = 502;
@@ -235,12 +239,14 @@ if ($mode === 'google') {
   foreach ($candidates as $model) {
     $attemptFlags = $searchAllowed ? [true, false] : [false];
     foreach ($attemptFlags as $withSearch) {
+      $isDeepGemini = $budget >= 20000 || in_array($primary, ['gemini-4-hydrogen', 'gemini-3.1-pro-preview', 'gemini-pro-latest'], true);
+      $maxGeminiOutput = $isDeepGemini ? 32768 : 16384;
       $payload = [
         'contents' => array_slice($body['contents'], -24),
         'generationConfig' => [
           'temperature' => $temperature,
           'topP' => 0.92,
-          'maxOutputTokens' => 8192,
+          'maxOutputTokens' => $maxGeminiOutput,
           'thinkingConfig' => [
             'includeThoughts' => true,
             'thinkingBudget' => $budget,
@@ -312,11 +318,11 @@ if ($groqKey !== '') {
       'messages' => $messages,
       'stream' => true,
       'temperature' => $temperature,
-      'max_tokens' => 4096,
+      'max_tokens' => $isFast ? 4096 : 8192,
     ];
     if (strpos($model, 'openai/gpt-oss') === 0) {
       $payload['reasoning_format'] = 'parsed';
-      $payload['reasoning_effort'] = 'high';
+      $payload['reasoning_effort'] = $isFast ? 'low' : 'high';
     }
     $attempt = ask_avi_stream_upstream(
       'https://api.groq.com/openai/v1/chat/completions',
@@ -345,8 +351,11 @@ if ($openRouterKey !== '') {
       'messages' => $messages,
       'stream' => true,
       'temperature' => $temperature,
-      'max_tokens' => 4096,
+      'max_tokens' => $isFast ? 4096 : 8192,
     ];
+    if (!$isFast) {
+      $payload['reasoning'] = ['effort' => 'high'];
+    }
     $attempt = ask_avi_stream_upstream(
       'https://openrouter.ai/api/v1/chat/completions',
       [

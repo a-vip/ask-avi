@@ -164,6 +164,8 @@ async function tryOpenAICompatibleUpstream(params: {
   models: string[];
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   temperature: number;
+  maxTokens?: number;
+  deepReasoning?: boolean;
   signal: AbortSignal;
 }): Promise<{ ok: true; result: UpstreamResult } | { ok: false; status: number; error: string }> {
   let lastStatus = 502;
@@ -184,11 +186,13 @@ async function tryOpenAICompatibleUpstream(params: {
       messages: params.messages,
       stream: true,
       temperature: params.temperature,
-      max_tokens: 4096,
+      max_tokens: params.maxTokens ?? 4096,
     };
     if (params.provider === 'groq' && model.startsWith('openai/gpt-oss')) {
       payload.reasoning_format = 'parsed';
-      payload.reasoning_effort = 'high';
+      payload.reasoning_effort = params.deepReasoning === false ? 'low' : 'high';
+    } else if (params.provider === 'openrouter' && params.deepReasoning) {
+      payload.reasoning = { effort: 'high' };
     }
 
     const res = await fetch(params.endpoint, {
@@ -258,13 +262,15 @@ async function tryGeminiUpstream(params: {
     ? requestedModel
     : DEFAULT_GEMINI_MODEL;
 
+  const isDeepGemini = DEEP_GEMINI_MODELS.has(primaryModel);
   const budget = Math.max(
     1024,
     Math.min(
       24576,
-      Number(params.body.thinkingBudget) || (DEEP_GEMINI_MODELS.has(primaryModel) ? 16384 : 8192)
+      Number(params.body.thinkingBudget) || (isDeepGemini ? 24576 : 12288)
     )
   );
+  const maxGeminiOutput = isDeepGemini || budget >= 20000 ? 32768 : 16384;
 
   const buildPayload = (includeSearch: boolean): Record<string, unknown> => {
     const payload: Record<string, unknown> = {
@@ -272,7 +278,7 @@ async function tryGeminiUpstream(params: {
       generationConfig: {
         temperature: params.temperature,
         topP: 0.92,
-        maxOutputTokens: 8192,
+        maxOutputTokens: maxGeminiOutput,
         thinkingConfig: {
           includeThoughts: true,
           thinkingBudget: budget,
@@ -430,14 +436,20 @@ export async function handleGeminiProxyRequest(
   }
 
   // 2. Completely Free Open-Source Provider Cascade (Groq -> OpenRouter :free -> Workers AI)
+  const isFastOss = mode === 'oss-fast';
+  const ossMaxTokens = isFastOss ? 4096 : 8192;
+  const deepReasoning = !isFastOss;
+
   if (groqKey) {
     const groq = await tryOpenAICompatibleUpstream({
       provider: 'groq',
       endpoint: 'https://api.groq.com/openai/v1/chat/completions',
       apiKey: groqKey,
-      models: mode === 'oss-fast' ? GROQ_FAST_MODELS : GROQ_REASONING_MODELS,
+      models: isFastOss ? GROQ_FAST_MODELS : GROQ_REASONING_MODELS,
       messages: openAIMessages,
       temperature,
+      maxTokens: ossMaxTokens,
+      deepReasoning,
       signal: request.signal,
     });
     if (groq.ok) return buildSseResponse(groq.result, corsHeaders);
@@ -450,9 +462,11 @@ export async function handleGeminiProxyRequest(
       provider: 'openrouter',
       endpoint: 'https://openrouter.ai/api/v1/chat/completions',
       apiKey: openRouterKey,
-      models: mode === 'oss-fast' ? OPENROUTER_FAST_MODELS : OPENROUTER_REASONING_MODELS,
+      models: isFastOss ? OPENROUTER_FAST_MODELS : OPENROUTER_REASONING_MODELS,
       messages: openAIMessages,
       temperature,
+      maxTokens: ossMaxTokens,
+      deepReasoning,
       signal: request.signal,
     });
     if (or.ok) return buildSseResponse(or.result, corsHeaders);

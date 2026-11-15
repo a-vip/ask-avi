@@ -22,7 +22,6 @@ import { ENGINE_OPTIONS, VOICE_STYLES } from '../data/persona';
 import type { AttachedContext, EngineId, VoiceStyle } from '../types/chat';
 import {
   allocateContextBudget,
-  estimateTokens,
   extractFileContext,
   fetchUrlContext,
   getContextBudgetLimits,
@@ -130,7 +129,11 @@ export function Composer({
   const budget = allocateContextBudget(rawContexts, isAuthenticated);
   const items = budget.items;
   const remainingSlots = Math.max(0, limits.maxItems - items.length);
-  const maxTokenLabel = `~${estimateTokens(limits.maxTotalChars).toLocaleString()} tok`;
+
+  const showCapacityWarning = () => {
+    const noun = limits.maxItems === 1 ? 'item' : 'items';
+    setAttachError(`Context limit reached (${limits.maxItems} ${noun} max). Remove an item to add another.`);
+  };
 
   const commitContexts = (next: AttachedContext[]) => {
     const allocated = allocateContextBudget(next, isAuthenticated).items;
@@ -187,8 +190,7 @@ export function Composer({
     if (files.length === 0) return;
 
     if (remainingSlots <= 0) {
-      const upgradeHint = !isAuthenticated ? ' Sign in free for up to 4 items (~2.5k tok).' : '';
-      setAttachError(`Up to ${limits.maxItems} context items can be attached per message.${upgradeHint}`);
+      showCapacityWarning();
       return;
     }
 
@@ -213,7 +215,9 @@ export function Composer({
       }
 
       if (files.length > chosen.length) {
-        failures.push(`Only the first ${chosen.length} file(s) fit the ${limits.maxItems}-item cap.`);
+        failures.push(
+          `Only the first ${chosen.length} file${chosen.length === 1 ? '' : 's'} fit the ${limits.maxItems}-item cap.`
+        );
       }
 
       if (failures.length > 0) {
@@ -229,8 +233,7 @@ export function Composer({
   const handleAddLink = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (remainingSlots <= 0) {
-      const upgradeHint = !isAuthenticated ? ' Sign in free for up to 4 items (~2.5k tok).' : '';
-      setAttachError(`Up to ${limits.maxItems} context items can be attached per message.${upgradeHint}`);
+      showCapacityWarning();
       return;
     }
     setAttachError('');
@@ -337,13 +340,28 @@ export function Composer({
                 </div>
               );
             })}
-            <span
-              className="attached-budget-pill"
-              title={`Automatically compacted to keep token usage healthy (${isAuthenticated ? 'account' : 'guest'} limit: up to ${limits.maxItems} items, ${maxTokenLabel} combined)`}
-            >
-              {items.length}/{limits.maxItems} · ~{budget.estimatedTokens} tok
-              {budget.trimmedAny ? ' · compacted' : ''}
-            </span>
+            {budget.trimmedAny && (
+              <span
+                className="attached-budget-warning"
+                title="Long context was automatically shortened to fit model budget"
+              >
+                <span>Trimmed to fit budget</span>
+                {!isAuthenticated && (
+                  <button
+                    type="button"
+                    className="popover-unlock-btn"
+                    onClick={() =>
+                      onRequireSignIn?.(
+                        undefined,
+                        'Unlock frontier models, deeper context, and saved conversations.'
+                      )
+                    }
+                  >
+                    Sign in for more →
+                  </button>
+                )}
+              </span>
+            )}
           </div>
         )}
 
@@ -374,40 +392,20 @@ export function Composer({
                 title="Attach dossiers, PDFs, docs, slides, text files, or web links"
               >
                 <Paperclip size={15} />
-                <span className="hide-xs">
-                  Context{items.length > 0 ? ` · ${items.length}` : ''}
-                </span>
+                <span className="hide-xs">Context</span>
               </button>
 
               {attachOpen && (
                 <div className="composer-popover composer-popover-context">
-                  <div className="popover-context-meta">
-                    <span>
-                      Attach context ({items.length}/{limits.maxItems})
-                    </span>
-                    {!isAuthenticated ? (
-                      <button
-                        type="button"
-                        className="popover-unlock-btn"
-                        onClick={() => {
-                          setAttachOpen(false);
-                          onRequireSignIn?.(
-                            undefined,
-                            'Unlock frontier models, deeper context, and saved conversations.'
-                          );
-                        }}
-                      >
-                        Unlock 4 items →
-                      </button>
-                    ) : (
-                      <span className="popover-budget-hint">Auto-compacted ≤2.5k tok</span>
-                    )}
-                  </div>
                   <button
                     type="button"
                     className="popover-item"
-                    disabled={remainingSlots <= 0 || isExtracting}
+                    disabled={isExtracting}
                     onClick={() => {
+                      if (remainingSlots <= 0) {
+                        showCapacityWarning();
+                        return;
+                      }
                       setAttachOpen(false);
                       onOpenDossierPicker();
                     }}
@@ -418,8 +416,14 @@ export function Composer({
                   <button
                     type="button"
                     className="popover-item"
-                    disabled={remainingSlots <= 0 || isExtracting}
-                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isExtracting}
+                    onClick={() => {
+                      if (remainingSlots <= 0) {
+                        showCapacityWarning();
+                        return;
+                      }
+                      fileInputRef.current?.click();
+                    }}
                   >
                     {isExtracting ? <Loader2 size={14} className="spin" /> : <FileText size={14} />}
                     <strong>Upload PDF, Docs, Slides, Text…</strong>
@@ -428,8 +432,12 @@ export function Composer({
                     <button
                       type="button"
                       className="popover-item"
-                      disabled={remainingSlots <= 0 || isExtracting}
+                      disabled={isExtracting}
                       onClick={() => {
+                        if (remainingSlots <= 0) {
+                          showCapacityWarning();
+                          return;
+                        }
                         setAttachError('');
                         setLinkMode(true);
                       }}
@@ -471,7 +479,26 @@ export function Composer({
                       </div>
                     </form>
                   )}
-                  {attachError && <p className="popover-context-error">{attachError}</p>}
+                  {attachError && (
+                    <div className="popover-context-warning">
+                      <p className="popover-context-error">{attachError}</p>
+                      {!isAuthenticated && remainingSlots <= 0 && (
+                        <button
+                          type="button"
+                          className="popover-unlock-btn"
+                          onClick={() => {
+                            setAttachOpen(false);
+                            onRequireSignIn?.(
+                              undefined,
+                              'Unlock frontier models, deeper context, and saved conversations.'
+                            );
+                          }}
+                        >
+                          Sign in for up to 4 items →
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
               <input

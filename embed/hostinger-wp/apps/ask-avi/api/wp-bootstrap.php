@@ -56,6 +56,7 @@ function ask_avi_get_settings(): array {
     'gemini_api_key' => '',
     'google_client_id' => '',
     'admin_passcode' => '',
+    'master_prompt' => '',
   ];
   if (function_exists('get_option')) {
     $saved = get_option(ASK_AVI_OPTION_KEY, []);
@@ -78,6 +79,89 @@ function ask_avi_get_settings(): array {
     }
   }
   return $defaults;
+}
+
+function ask_avi_default_master_prompt(): string {
+  return implode("\n", [
+    'I am Avi Perera — speaking directly in conversation on aviperera.com.',
+    '',
+    'Background & Grounding:',
+    '- Raised in Harrow, London as the first in my family to attend university, working to self-fund higher education. My studies span Mathematics (The Open University and the University of Essex), Applied Mathematics for Machine Learning (Imperial College London), Data Science & Artificial Intelligence (Northumbria University; 2021 Google Scholarship), First Class Law LLB (University of Buckingham, High Achiever Award), and First Class International Relations (University of Cambridge).',
+    '- Driven by philosophy, computer science, neuroscience, pure and applied mathematics, jurisprudence, and AI governance. I always reason from first principles — excavating causal architecture, incentive structures, mathematical bounds, and human realities rather than repeating consensus talking points or branding slogans.',
+    '- Policy & research work across AI governance, autonomous weapons systems, and International Humanitarian Law with UNIDIR, UNODA, UNRCPD, the Campaign to Stop Killer Robots (Anticipatory Objection Registry), and The Royal Society (online information ecosystems & algorithmic radicalisation), dividing time across London, Geneva, and Bangkok.',
+    '- Things built: SovDash (3D WebGL geopolitical OSINT console at app.sovdash.com), Lex Machina (legal Git corpus + FastMCP server), LAWS Simulator (sim.sovdash.com), Global AI Policy Tracker, The Echo Realm (32-bit RPG), Suiji (Go/Weiqi AI dojo), and Agentic Launchpad.',
+    '- Core commitments: Reject false binaries ("Neither a techno-optimist nor an AI doomsayer — I am for accountability"). Interrogate "linguistic superposition" in high-stakes rhetoric and insist on verifiable technical and legal constraints over voluntary pledges ("Control is not a button; it is an architecture", "Achievement is a receipt. Confidence is weather").',
+    '',
+    'Method & Voice:',
+    '- Think slowly and deeply from first principles: unpack definitions, surface unstated premises, stress-test strongest counter-arguments, trace downstream failure modes, and draw structural connections across philosophy, mathematics, computation, neuroscience, and law.',
+    '- Keep any preparatory thinking wholly immersed in the substance of the problem — ideas, definitions, evidence, causal links, and counter-arguments.',
+    '- Reply candidly, incisively, and warmly in British English across any subject — world events, philosophy, law, software engineering, career decisions, mathematics, or life — using live web findings when current facts matter, never stitching canned passages from old essays.',
+    '- Fold genuinely relevant archive references in quietly as [1], [2] without inventing details. Only when asked directly about consulting, briefings, or contact, share https://calendly.com/aviperera/free-consultation or workwithavip@gmail.com briefly.',
+  ]);
+}
+
+function ask_avi_voice_style_directive(string $style): string {
+  $map = [
+    'standard' => 'Conversational, intellectually honest, and unpretentious — clear first-principles analysis without academic stiffness.',
+    'blunt' => 'Direct, unsentimental, and concise — cut straight to the underlying incentives, trade-offs, and what actually breaks in practice.',
+    'academic' => 'Rigorous analytical and international-law register referencing concrete treaties and mechanisms (Additional Protocol I Art. 36, Martens Clause, CCW GGE) where apt.',
+    'mentor' => 'Warm, reflective, and grounded — speak honestly like a thoughtful conversation over coffee, valuing lived evidence over performative polish.',
+  ];
+  $key = strtolower(trim($style));
+  return $map[$key] ?? $map['standard'];
+}
+
+function ask_avi_clip_utf8(string $text, int $limit): string {
+  if ($limit <= 0 || $text === '') {
+    return '';
+  }
+  if (function_exists('mb_substr')) {
+    return mb_substr($text, 0, $limit, 'UTF-8');
+  }
+  return substr($text, 0, $limit);
+}
+
+function ask_avi_assemble_system_prompt(
+  string $masterPromptOverride,
+  string $voiceStyle,
+  string $archiveBlock,
+  string $webContext,
+  string $attachedContext,
+  bool $isAuthenticated
+): string {
+  $basePrompt = trim($masterPromptOverride);
+  if ($basePrompt === '') {
+    $basePrompt = ask_avi_default_master_prompt();
+  }
+  $basePrompt = ask_avi_clip_utf8($basePrompt, 12000);
+
+  $styleDirective = ask_avi_voice_style_directive($voiceStyle);
+  $archive = ask_avi_clip_utf8(trim($archiveBlock), 6000);
+  $web = ask_avi_clip_utf8(trim($webContext), 6000);
+  $maxAttached = $isAuthenticated ? 12000 : 8000;
+  $attachedRaw = ask_avi_clip_utf8(trim($attachedContext), $maxAttached);
+  $attachedBlock = '';
+  if ($attachedRaw !== '') {
+    $attachedBlock = strpos($attachedRaw, 'USER-ATTACHED CONTEXT') === 0
+      ? $attachedRaw
+      : "USER-ATTACHED DOCUMENT (respond directly to this):\n" . $attachedRaw;
+  }
+
+  $parts = [
+    $basePrompt,
+    '',
+    'REGISTER: ' . $styleDirective,
+  ];
+  if ($archive !== '') {
+    $parts[] = "\nRELEVANT ARCHIVE REFERENCES:\n" . $archive;
+  }
+  if ($web !== '') {
+    $parts[] = "\n" . $web;
+  }
+  if ($attachedBlock !== '') {
+    $parts[] = "\n" . $attachedBlock;
+  }
+  return implode("\n", $parts);
 }
 
 function ask_avi_ensure_tables(): void {

@@ -410,7 +410,9 @@ describe('Minimalist Frontier UI Upgrades', () => {
     );
 
     expect(guestComposer.container.querySelectorAll('.attached-chip').length).toBe(2);
-    expect(guestComposer.container.querySelector('.attached-budget-pill')?.textContent).toContain('2/2');
+    // Clean composer bar: no upfront budget counter pill when items fit normally
+    expect(guestComposer.container.querySelector('.attached-budget-pill')).toBeNull();
+    expect(guestComposer.container.querySelector('.attached-budget-warning')).toBeNull();
     expect(guestComposer.container.textContent).toContain('DOSSIER');
     expect(guestComposer.container.textContent).toContain('LINK');
 
@@ -432,7 +434,20 @@ describe('Minimalist Frontier UI Upgrades', () => {
     });
     expect(guestComposer.container.textContent).toContain('Upload PDF, Docs, Slides, Text');
     expect(guestComposer.container.textContent).toContain('Add web link (URL)');
-    expect(guestComposer.container.textContent).toContain('Unlock 4 items');
+    expect(guestComposer.container.textContent).not.toContain('Auto-compacted');
+    expect(guestComposer.container.textContent).not.toContain('Unlock 4 items');
+    expect(guestComposer.container.querySelector('.popover-context-warning')).toBeNull();
+
+    // Trying to add beyond guest 2-item capacity reveals the overflow warning + sign-in action
+    const attachDossierBtn = Array.from(
+      guestComposer.container.querySelectorAll<HTMLButtonElement>('.popover-item')
+    ).find((b) => b.textContent?.includes('Attach a dossier'));
+    act(() => {
+      attachDossierBtn?.click();
+    });
+    expect(guestComposer.container.querySelector('.popover-context-warning')?.textContent).toContain(
+      'Context limit reached (2 items max)'
+    );
 
     const unlockBtn = guestComposer.container.querySelector<HTMLButtonElement>('.popover-unlock-btn');
     act(() => {
@@ -486,7 +501,8 @@ describe('Minimalist Frontier UI Upgrades', () => {
       />
     );
 
-    expect(authedComposer.container.querySelector('.attached-budget-pill')?.textContent).toContain('1/4');
+    expect(authedComposer.container.querySelector('.attached-budget-pill')).toBeNull();
+    expect(authedComposer.container.textContent).not.toContain('Auto-compacted');
     expect(authedComposer.container.textContent).not.toContain('Unlock 4 items');
 
     act(() => {
@@ -640,5 +656,76 @@ describe('Minimalist Frontier UI Upgrades', () => {
     });
     expect(onInspectSource).not.toHaveBeenCalled();
     cleanup();
+  });
+
+  it('filters leaked meta-prompt directives out of rendered thinking blocks and hides pure-meta reasoning', () => {
+    const leakedMsg: ChatMessage = {
+      id: 'm-thought-leak',
+      role: 'assistant',
+      thoughts: [
+        'They want an answer in the persona of Avi Perera (Ask Avi), as per developer instructions.',
+        'Spinoza anchors power in causal capacity rather than mere formal decrees.',
+        'Make sure British spelling: "realise", "organisation". Use "I" and "my".',
+        'Now produce final answer.',
+      ].join('\n'),
+      content: 'Spinoza looks at power through relational capacity.',
+      createdAt: Date.now(),
+      isStreaming: false,
+      isThinking: false,
+      thinkingMs: 4200,
+    };
+
+    const leakedBubble = mountTestElement(
+      <MessageBubble
+        message={leakedMsg}
+        isLastAssistant
+        onEditUserMessage={vi.fn()}
+        onRegenerate={vi.fn()}
+        onFollowUpClick={vi.fn()}
+        onInspectSource={vi.fn()}
+        onFeedback={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    const toggle = leakedBubble.container.querySelector<HTMLButtonElement>('.ag-thinking-header');
+    expect(toggle).not.toBeNull();
+    act(() => {
+      toggle?.click();
+    });
+
+    const thoughtText =
+      leakedBubble.container.querySelector('.ag-thinking-body')?.textContent ?? '';
+    expect(thoughtText).toContain('Spinoza anchors power in causal capacity');
+    expect(thoughtText).not.toMatch(/developer instructions/i);
+    expect(thoughtText).not.toMatch(/persona of Avi/i);
+    expect(thoughtText).not.toMatch(/British spelling/i);
+    expect(thoughtText).not.toMatch(/Now produce final answer/i);
+    leakedBubble.cleanup();
+
+    const pureMetaMsg: ChatMessage = {
+      id: 'm-thought-empty',
+      role: 'assistant',
+      thoughts: 'As per developer instructions, maintain the persona of Avi Perera. Now produce final answer.',
+      content: 'Direct answer without empty reasoning chrome.',
+      createdAt: Date.now(),
+      isStreaming: false,
+      isThinking: false,
+      thinkingMs: 1200,
+    };
+    const pureMetaBubble = mountTestElement(
+      <MessageBubble
+        message={pureMetaMsg}
+        isLastAssistant
+        onEditUserMessage={vi.fn()}
+        onRegenerate={vi.fn()}
+        onFollowUpClick={vi.fn()}
+        onInspectSource={vi.fn()}
+        onFeedback={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+    expect(pureMetaBubble.container.querySelector('.ag-thinking-block')).toBeNull();
+    pureMetaBubble.cleanup();
   });
 });

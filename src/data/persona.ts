@@ -30,7 +30,7 @@ export const ENGINE_OPTIONS: EngineOption[] = [
     providerKind: 'google',
     requiresAuth: true,
     description:
-      'Optional Google Gemini 3 Flash extended thinking (8k budget) with live web grounding.',
+      'Optional Google Gemini 3 Flash extended thinking (12k budget) with live web grounding.',
     geminiModelId: 'gemini-3-flash-preview',
     geminiFallbackModels: [
       'gemini-3-flash-preview',
@@ -38,7 +38,7 @@ export const ENGINE_OPTIONS: EngineOption[] = [
       'gemini-3.8-flash',
       'gemini-flash-lite-latest',
     ],
-    thinkingBudget: 8192,
+    thinkingBudget: 12288,
   },
   {
     id: 'gemini-pro',
@@ -48,7 +48,7 @@ export const ENGINE_OPTIONS: EngineOption[] = [
     providerKind: 'google',
     requiresAuth: true,
     description:
-      'Optional Google Gemini 4 Hydrogen deep thinking (16k budget) for complex philosophy, strategy, law, and coding.',
+      'Optional Google Gemini 4 Hydrogen deep thinking (24k budget) for complex philosophy, strategy, law, and coding.',
     geminiModelId: 'gemini-4-hydrogen',
     geminiFallbackModels: [
       'gemini-4-hydrogen',
@@ -56,7 +56,7 @@ export const ENGINE_OPTIONS: EngineOption[] = [
       'gemini-pro-latest',
       'gemini-3-flash-preview',
     ],
-    thinkingBudget: 16384,
+    thinkingBudget: 24576,
   },
   {
     id: 'custom-api',
@@ -80,7 +80,7 @@ export const VOICE_STYLES: VoiceStyleMeta[] = [
     id: 'standard',
     label: 'Avi Standard',
     directive:
-      'Conversational, intellectually honest, first-person ("I") prose with British spelling and clear, unpretentious logic.',
+      'Conversational, intellectually honest, and unpretentious — clear first-principles analysis without academic stiffness.',
   },
   {
     id: 'blunt',
@@ -92,7 +92,7 @@ export const VOICE_STYLES: VoiceStyleMeta[] = [
     id: 'academic',
     label: 'Legal & Academic',
     directive:
-      'Rigorous analytical and international-law register referencing concrete treaties, mechanisms (Additional Protocol I Art. 36, Martens Clause, CCW GGE), and empirical framing where apt.',
+      'Rigorous analytical and international-law register referencing concrete treaties and mechanisms (Additional Protocol I Art. 36, Martens Clause, CCW GGE) where apt.',
   },
   {
     id: 'mentor',
@@ -192,6 +192,21 @@ export function getTimeGreeting(): string {
   return 'Good evening.';
 }
 
+export function formatArchiveRefsBlock(sources: RetrievedSource[]): string {
+  if (!sources.length) return '';
+  return sources
+    .map((s) => {
+      const excerpt = s.snippet.replace(/\s+/g, ' ').trim().slice(0, 260);
+      return `[${s.index}] ${s.entry.title}${s.entry.doi ? ` (DOI: ${s.entry.doi})` : ''} — ${s.entry.url}\nContext: ${excerpt}`;
+    })
+    .join('\n\n');
+}
+
+/**
+ * Fallback system prompt builder used ONLY when the user selects a browser-direct Custom API
+ * endpoint (bypassing the site's backend proxy) or in offline unit tests.
+ * The authoritative Master Prompt & Reasoning Policy lives exclusively on the backend.
+ */
 export function buildAviSystemPrompt(
   voiceStyle: VoiceStyle,
   sources: RetrievedSource[],
@@ -200,15 +215,7 @@ export function buildAviSystemPrompt(
   liveWebContext?: string
 ): string {
   const styleMeta = VOICE_STYLES.find((s) => s.id === voiceStyle) ?? VOICE_STYLES[0];
-
-  const conciseRefs = sources.length
-    ? sources
-        .map((s) => {
-          const excerpt = s.snippet.replace(/\s+/g, ' ').trim().slice(0, 260);
-          return `[${s.index}] ${s.entry.title}${s.entry.doi ? ` (DOI: ${s.entry.doi})` : ''} — ${s.entry.url}\nContext: ${excerpt}`;
-        })
-        .join('\n\n')
-    : '';
+  const conciseRefs = formatArchiveRefsBlock(sources);
 
   const trimmedAttached = attachedSnippet?.trim() ?? '';
   const attachedBlock = trimmedAttached
@@ -220,25 +227,22 @@ export function buildAviSystemPrompt(
   const webBlock = liveWebContext?.trim() ? `\n\n${liveWebContext.trim()}` : '';
 
   return [
-    `You are Ask Avi — the conversational AI persona of Avi Perera (British AI governance and International Humanitarian Law researcher, legal scholar, essayist, and founder of SovDash).`,
+    `You are Avi Perera, speaking directly with visitors on Ask Avi (aviperera.com).`,
     ``,
-    `IDENTITY, BACKGROUND & WORLDVIEW:`,
-    `- Background: Grew up in Harrow, London as the first in his family to attend university, working to self-fund higher education; studied Law & International Studies (University of Buckingham) and International Relations / AI Governance (University of Cambridge); researches & advocates with UNIDIR and the Campaign to Stop Killer Robots; splits time across London, Geneva, and Bangkok.`,
-    `- Perspective: Reason from first principles. Inspect structural incentives rather than corporate/political press releases; reject false binaries ("Neither a techno-optimist nor an AI doomsayer — I am for accountability"); defend nuance and context ("linguistic superposition"); prefer enforceable law over voluntary pledges; judge by tangible evidence rather than status theatre ("Achievement is a receipt. Confidence is weather", "Control is not a button; it is an architecture").`,
-    `- Things Avi builds: SovDash (3D WebGL geopolitical OSINT console at app.sovdash.com), Lex Machina (legal Git corpus + FastMCP server), LAWS Simulator (sim.sovdash.com), Global AI Policy Tracker, The Echo Realm (32-bit RPG), Suiji (Go/Weiqi AI dojo), Agentic Launchpad.`,
-    `- Register (${styleMeta.label}): ${styleMeta.directive} Use natural British English spelling (rigour, sceptical, analyse, organisation, normalised).`,
+    `INTELLECTUAL GROUNDING & BACKGROUND:`,
+    `- Grew up in Harrow, London; first in family to attend university, working to self-fund higher education. Academic training spans Mathematics (Open University & University of Essex), Applied Mathematics for Machine Learning (Imperial College London), Data Science & AI (Northumbria University; 2021 Google Scholarship), First Class Law LLB (University of Buckingham, High Achiever Award), and First Class International Relations (University of Cambridge).`,
+    `- Passions & method: Philosophy, computer science, neuroscience, mathematics, law, and AI governance — committed to rigorous first-principles reasoning over consensus talking points.`,
+    `- Work & systems: UNIDIR, UNODA, UNRCPD, Campaign to Stop Killer Robots, The Royal Society; SovDash, Lex Machina, LAWS Simulator, Global AI Policy Tracker, The Echo Realm, Suiji, Agentic Launchpad.`,
+    `- Register (${styleMeta.label}): ${styleMeta.directive} Write naturally in British English.`,
     ``,
-    `CONVERSATION PRINCIPLES (CRITICAL):`,
-    `1. Think carefully and deeply before speaking: examine the user's actual question, unstated premise, edge cases, and practical tensions. Give a well-considered, nuanced, genuinely thoughtful answer.`,
-    `2. Respond directly in first-person ("I") dialogue as an intelligent human interlocutor. NEVER regurgitate, copy, or mechanically stitch paragraphs from your old writings.`,
-    `3. Embrace the full breadth of conversation: live world events, open-ended philosophical debates, software architecture & debugging, career trade-offs, geopolitics, law, or life — using live web search whenever current facts or external context matter.`,
-    `4. When Avi archive references appear below, cite them inline ([1], [2]) ONLY if genuinely helpful and directly responsive to what the user asked — never shoehorn them into unrelated topics. Never fabricate DOIs, URLs, or credentials.`,
-    `5. If someone specifically asks about consulting, briefings, or direct contact, point them to https://calendly.com/aviperera/free-consultation or workwithavip@gmail.com.`,
+    `REASONING & DIALOGUE:`,
+    `- Deliberate deeply on the substance, definitions, causal mechanisms, and tensions of the question, keeping preparatory thinking absorbed in the ideas themselves.`,
+    `- Reply naturally in British English, never regurgitate archive paragraphs, integrate helpful archive references quietly as [1], [2] without inventing details, and share https://calendly.com/aviperera/free-consultation or workwithavip@gmail.com only when asked about consulting or contact.`,
     useInlineThoughtTags
-      ? `6. Structure your private scratchpad briefly inside <thought>...</thought> tags before your visible answer.`
+      ? `- Place pure domain reasoning inside <thought>...</thought> before your visible answer.`
       : '',
     conciseRefs
-      ? `\nRELEVANT ARCHIVE LINKS BY AVI PERERA (reference [1], [2] only if directly helpful):\n${conciseRefs}`
+      ? `\nRELEVANT ARCHIVE REFERENCES (integrate only if genuinely useful):\n${conciseRefs}`
       : '',
     webBlock,
     attachedBlock,

@@ -27,7 +27,8 @@ import {
   MAX_TOTAL_CONTEXT_CHARS,
 } from '../src/utils/contextExtractor';
 import { renderMarkdownToSafeHtml, resolveSourceUrl } from '../src/utils/markdown';
-import { splitThinkingAndAnswer } from '../src/utils/thinking';
+import { assembleServerSystemPrompt, DEFAULT_SERVER_MASTER_PROMPT } from '../shared/masterPrompt';
+import { sanitizeThinkingTrace, splitThinkingAndAnswer } from '../src/utils/thinking';
 import {
   DEFAULT_SETTINGS,
   deriveThreadTitle,
@@ -80,8 +81,8 @@ describe('Free Open-Source Default, Multi-Provider Config & SSE Parsers', () => 
     expect(ENGINE_OPTIONS[0].providerKind).toBe('open-source');
     expect(ENGINE_OPTIONS[2].geminiModelId).toBe('gemini-3-flash-preview');
     expect(ENGINE_OPTIONS[3].geminiModelId).toBe('gemini-4-hydrogen');
-    expect(ENGINE_OPTIONS[2].thinkingBudget).toBe(8192);
-    expect(ENGINE_OPTIONS[3].thinkingBudget).toBe(16384);
+    expect(ENGINE_OPTIONS[2].thinkingBudget).toBe(12288);
+    expect(ENGINE_OPTIONS[3].thinkingBudget).toBe(24576);
   });
 
   it('extracts streamed reasoning and content deltas from Groq / OpenRouter / Workers AI chunks', () => {
@@ -462,5 +463,69 @@ describe('Thread Storage & Export Helpers', () => {
     expect(xlsx.kind).toBe('doc');
     expect(xlsx.content).toContain('Treaty');
     expect(xlsx.content).toContain('Binding');
+  });
+
+  it('strips leaked prompt, persona, spelling, and citation checklists from visible thinking while keeping domain reasoning', () => {
+    const leakedTrace = [
+      'We need to respond as ChatGPT, but with a specific persona: The user is asking: "What draws you to Spinoza?" Must not give a canned answer.',
+      'Must be candid, incisive, warmly. Use live web findings when current facts matter, never stitching canned passages from old essays. Use archive references quietly as [1], [2] if needed. No invented details.',
+      'Spinoza treats causal structure and conatus as immanent rather than external to human agency.',
+      'We need to follow developer instructions: respond directly in first person, no cosplay. Also need to point to the Calendly link.',
+      'Make sure British spelling: "realise", "organisation". Use "I" and "my".',
+      'Now to comply with their instruction: cite inline [1], [2].',
+      '1. Monism removes the false human-versus-machine binary.',
+      'We must not mention the policy or that we are an AI language model. The user did not ask for consulting. We must not provide disallowed content, only citations like [1] without inventing details.',
+      'The answer should be in a conversational tone.',
+      'Now produce final answer.',
+    ].join('\n');
+
+    const cleaned = sanitizeThinkingTrace(leakedTrace, true);
+    expect(cleaned).toContain('Spinoza treats causal structure and conatus as immanent');
+    expect(cleaned).toContain('1. Monism removes the false human-versus-machine binary.');
+    expect(cleaned).not.toMatch(/developer instructions/i);
+    expect(cleaned).not.toMatch(/persona of Avi/i);
+    expect(cleaned).not.toMatch(/british spelling/i);
+    expect(cleaned).not.toMatch(/calendly/i);
+    expect(cleaned).not.toMatch(/cite inline/i);
+    expect(cleaned).not.toMatch(/canned passages/i);
+    expect(cleaned).not.toMatch(/No invented details/i);
+    expect(cleaned).not.toMatch(/Must be candid/i);
+    expect(cleaned).not.toMatch(/Now produce final answer/i);
+
+    // During active streaming (flushPartial = false), holds incomplete meta prefix until sentence completes
+    const partialStream =
+      'Causal interdependence underpins meaningful human control.\nWe need to follow develop';
+    const liveClean = sanitizeThinkingTrace(partialStream, false);
+    expect(liveClean).toBe('Causal interdependence underpins meaningful human control.');
+  });
+
+  it('assembles accurate biography & philosophy in backend Master Prompt and supports WP Admin overrides', () => {
+    expect(DEFAULT_SERVER_MASTER_PROMPT).toContain('Open University');
+    expect(DEFAULT_SERVER_MASTER_PROMPT).toContain('University of Essex');
+    expect(DEFAULT_SERVER_MASTER_PROMPT).toContain('Imperial College London');
+    expect(DEFAULT_SERVER_MASTER_PROMPT).toContain('First Class Law LLB');
+    expect(DEFAULT_SERVER_MASTER_PROMPT).toContain('University of Cambridge');
+    expect(DEFAULT_SERVER_MASTER_PROMPT).toContain('philosophy, computer science, neuroscience');
+    expect(DEFAULT_SERVER_MASTER_PROMPT).not.toContain('International Studies');
+
+    const bio = knowledgeIndex.getAllEntries().find((e) => e.id === 'pillar-bio-identity');
+    expect(bio?.chunks[0]).toContain('Mathematics');
+    expect(bio?.chunks[0]).toContain('neuroscience');
+    expect(bio?.chunks[0]).not.toContain('International Studies');
+
+    const assembled = assembleServerSystemPrompt({
+      voiceStyle: 'academic',
+      archiveBlock: '[1] The Global Shell Game — https://aviperera.com/the-global-shell-game/',
+    });
+    expect(assembled).toContain('Open University');
+    expect(assembled).toContain('Additional Protocol I Art. 36');
+    expect(assembled).toContain('[1] The Global Shell Game');
+
+    const overridden = assembleServerSystemPrompt({
+      masterPromptOverride: 'Custom backend policy directive.',
+      voiceStyle: 'standard',
+    });
+    expect(overridden).toContain('Custom backend policy directive.');
+    expect(overridden).not.toContain('Open University');
   });
 });

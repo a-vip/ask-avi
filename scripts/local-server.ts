@@ -4,6 +4,7 @@ import { extname, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { handleGeminiProxyRequest, type ProxyEnv } from '../shared/geminiProxy.ts';
+import { assembleServerSystemPrompt } from '../shared/masterPrompt.ts';
 import { fetchPublicUrlContext } from '../shared/urlFetcher.ts';
 
 const ROOT_DIR = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -79,6 +80,10 @@ async function handleApiRequest(
       const parsed = JSON.parse(Buffer.from(body).toString('utf8')) as {
         mode?: string;
         model?: string;
+        voiceStyle?: string;
+        archiveBlock?: string;
+        webContext?: string;
+        attachedContext?: string;
         systemInstruction?: string;
         contents?: Array<{ role?: string; parts?: Array<{ text?: string }> }>;
       };
@@ -96,12 +101,22 @@ async function handleApiRequest(
         return;
       }
 
-      const maxSysChars = bearerUser ? 18000 : 10500;
+      const maxSysChars = bearerUser ? 18000 : 12000;
       const maxTurns = bearerUser ? 18 : 12;
       const maxPartChars = bearerUser ? 10000 : 6000;
-      if (typeof parsed.systemInstruction === 'string') {
-        parsed.systemInstruction = parsed.systemInstruction.slice(0, maxSysChars);
-      }
+      const localMasterPath = join(ROOT_DIR, '.ask-avi-data', 'master-prompt.txt');
+      const localMasterOverride = existsSync(localMasterPath)
+        ? readFileSync(localMasterPath, 'utf8')
+        : undefined;
+      // Assemble authoritative Master Prompt strictly on the backend, ignoring any untrusted client override.
+      parsed.systemInstruction = assembleServerSystemPrompt({
+        masterPromptOverride: localMasterOverride,
+        voiceStyle: parsed.voiceStyle,
+        archiveBlock: parsed.archiveBlock,
+        webContext: parsed.webContext,
+        attachedContext: parsed.attachedContext,
+        isAuthenticated: Boolean(bearerUser),
+      }).slice(0, maxSysChars);
       if (Array.isArray(parsed.contents)) {
         parsed.contents = parsed.contents.slice(-maxTurns).map((turn) => ({
           ...turn,

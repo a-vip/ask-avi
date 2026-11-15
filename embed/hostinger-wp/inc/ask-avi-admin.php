@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
  * provision database tables, and purge LiteSpeed caches on new theme version rollout.
  */
 add_action('init', static function () {
-  if (get_option('ask_avi_deployment_ver') === '20261114e') {
+  if (get_option('ask_avi_deployment_ver') === '20261115a') {
     return;
   }
 
@@ -45,7 +45,7 @@ add_action('init', static function () {
     }
   }
 
-  update_option('ask_avi_deployment_ver', '20261114e', false);
+  update_option('ask_avi_deployment_ver', '20261115a', false);
   flush_rewrite_rules(false);
   do_action('litespeed_purge_all');
   if (class_exists('\LiteSpeed\Purge')) {
@@ -175,16 +175,42 @@ function ask_avi_render_admin_page(): void {
   $users_exists = ($wpdb->get_var("SHOW TABLES LIKE '{$users_table}'") === $users_table);
 
   $saved = false;
+  $masterReset = false;
   $adminPwSaved = false;
   $adminPwError = '';
-  if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ask_avi_save_settings'])) {
+  if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ask_avi_reset_master_prompt'])) {
     check_admin_referer('ask_avi_save_settings');
+    $existing = function_exists('ask_avi_get_settings') ? ask_avi_get_settings() : (get_option('ask_avi_settings', []) ?: []);
+    if (!is_array($existing)) $existing = [];
+    $existing['master_prompt'] = '';
+    update_option('ask_avi_settings', $existing, false);
+    $masterReset = true;
+    $saved = true;
+  } elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ask_avi_save_settings'])) {
+    check_admin_referer('ask_avi_save_settings');
+    $existing = function_exists('ask_avi_get_settings') ? ask_avi_get_settings() : (get_option('ask_avi_settings', []) ?: []);
+    if (!is_array($existing)) $existing = [];
+
+    $rawMaster = array_key_exists('master_prompt', $_POST)
+      ? trim(str_replace(["\r\n", "\r"], "\n", (string) wp_unslash($_POST['master_prompt'])))
+      : (string) ($existing['master_prompt'] ?? '');
+    $defaultMaster = function_exists('ask_avi_default_master_prompt') ? trim(ask_avi_default_master_prompt()) : '';
+    if ($rawMaster !== '' && $defaultMaster !== '' && $rawMaster === $defaultMaster) {
+      $rawMaster = '';
+    }
+    if (function_exists('mb_substr')) {
+      $rawMaster = mb_substr($rawMaster, 0, 12000, 'UTF-8');
+    } else {
+      $rawMaster = substr($rawMaster, 0, 12000);
+    }
+
     $next = [
       'groq_api_key' => sanitize_text_field(wp_unslash($_POST['groq_api_key'] ?? '')),
       'openrouter_api_key' => sanitize_text_field(wp_unslash($_POST['openrouter_api_key'] ?? '')),
       'gemini_api_key' => sanitize_text_field(wp_unslash($_POST['gemini_api_key'] ?? '')),
       'google_client_id' => sanitize_text_field(wp_unslash($_POST['google_client_id'] ?? '')),
       'admin_passcode' => '',
+      'master_prompt' => $rawMaster,
     ];
     update_option('ask_avi_settings', $next, false);
 
@@ -293,10 +319,12 @@ function ask_avi_render_admin_page(): void {
 
     <?php if ($adminPwError !== ''): ?>
       <div class="notice notice-error is-dismissible"><p><?php echo esc_html($adminPwError); ?></p></div>
+    <?php elseif ($masterReset): ?>
+      <div class="notice notice-success is-dismissible"><p>Master Prompt &amp; Reasoning Policy reset to built-in default.</p></div>
     <?php elseif ($adminPwSaved): ?>
-      <div class="notice notice-success is-dismissible"><p>Ask Avi backend keys and admin email password saved securely.</p></div>
+      <div class="notice notice-success is-dismissible"><p>Ask Avi backend settings and admin email password saved securely.</p></div>
     <?php elseif ($saved): ?>
-      <div class="notice notice-success is-dismissible"><p>Ask Avi backend keys saved securely in WordPress options.</p></div>
+      <div class="notice notice-success is-dismissible"><p>Ask Avi backend settings saved securely in WordPress options.</p></div>
     <?php elseif (isset($_GET['deleted']) && $_GET['deleted'] === '1'): ?>
       <div class="notice notice-success is-dismissible"><p>User record removed from Ask Avi directory.</p></div>
     <?php endif; ?>
@@ -331,6 +359,24 @@ function ask_avi_render_admin_page(): void {
             <p class="description">
               Status: <strong><?php echo $hasAdminPassword ? 'Password configured' : 'Not set yet'; ?></strong> for <code><?php echo esc_html($adminEmail); ?></code>.
               Set this (min 6 characters) if you want to sign into Ask Avi via Email &amp; Password without showing any passcode prompt on the public login modal. Google Sign-In and logged-in WordPress Admin sessions also authenticate automatically.
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <th scope="row"><label for="ask-avi-master-prompt">Master Prompt &amp; Reasoning Policy</label></th>
+          <td>
+            <?php
+              $savedMaster = trim((string) ($opts['master_prompt'] ?? ''));
+              $defaultMaster = function_exists('ask_avi_default_master_prompt') ? ask_avi_default_master_prompt() : '';
+              $displayMaster = $savedMaster !== '' ? $savedMaster : $defaultMaster;
+            ?>
+            <textarea id="ask-avi-master-prompt" name="master_prompt" rows="16" class="large-text code" style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5;"><?php echo esc_textarea($displayMaster); ?></textarea>
+            <p class="description">
+              Authoritative backend-only system prompt &amp; inner-reasoning policy injected server-side into every chat request (never exposed to or editable from the public frontend).
+              Status: <strong><?php echo $savedMaster !== '' ? 'Custom prompt active' : 'Using built-in default'; ?></strong>.
+            </p>
+            <p style="margin-top:8px;">
+              <button type="submit" name="ask_avi_reset_master_prompt" value="1" class="button" onclick="return confirm('Reset the backend Master Prompt back to the built-in default?');">Reset to Built-In Default Prompt</button>
             </p>
           </td>
         </tr>

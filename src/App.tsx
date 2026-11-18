@@ -791,6 +791,9 @@ export default function App() {
               }}
               isAdmin={isAdmin}
               isAuthenticated={isAuthenticated}
+              userName={userProfile?.name}
+              threadCount={threads.length}
+              theme={settings.theme}
               onRequireSignIn={handleRequireSignIn}
               proxyUrl={settings.proxyUrl}
               sessionToken={userProfile?.sessionToken}

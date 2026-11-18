@@ -1,4 +1,5 @@
 import type { EngineOption, RetrievedSource, VoiceStyle } from '../types/chat';
+import { selectDynamicGreeting, type GreetingVisitorInput } from './greetings';
 
 export const AVI_AVATAR_URL =
   'https://aviperera.com/wp-content/uploads/2024/09/Avi-Perera-website-aviperera.com-logo-welcome-to-my-website-friends-why-did-you-download-this-logo-100x100.png';
@@ -184,12 +185,8 @@ export const VERIFIED_LINKS = [
   { label: 'Book Consultation', url: 'https://calendly.com/aviperera/free-consultation' },
 ];
 
-export function getTimeGreeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 5) return 'Burning the midnight oil?';
-  if (hour < 12) return 'Good morning.';
-  if (hour < 18) return 'Good afternoon.';
-  return 'Good evening.';
+export function getTimeGreeting(input?: GreetingVisitorInput): string {
+  return selectDynamicGreeting(input).headline;
 }
 
 export function formatArchiveRefsBlock(sources: RetrievedSource[]): string {

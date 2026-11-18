@@ -871,6 +871,8 @@ a {
 .welcome-badge-row {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 14px;
 }
@@ -878,14 +880,32 @@ a {
 .welcome-eyebrow {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   padding: 5px 12px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.72rem;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: border-color 0.18s, color 0.18s, transform 0.16s, background 0.18s;
+}
+
+.welcome-eyebrow:hover {
+  border-color: var(--accent);
   color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.welcome-shuffle-icon {
+  opacity: 0.7;
+  transition: transform 0.3s ease, opacity 0.18s;
+}
+
+.welcome-eyebrow:hover .welcome-shuffle-icon {
+  opacity: 1;
+  transform: rotate(90deg);
 }
 
 .welcome-heading {

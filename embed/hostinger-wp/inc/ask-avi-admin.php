@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
  * provision database tables, and purge LiteSpeed caches on new theme version rollout.
  */
 add_action('init', static function () {
-  if (get_option('ask_avi_deployment_ver') === '20261115g') {
+  if (get_option('ask_avi_deployment_ver') === '20261118a') {
     return;
   }
 
@@ -45,7 +45,7 @@ add_action('init', static function () {
     }
   }
 
-  update_option('ask_avi_deployment_ver', '20261115g', false);
+  update_option('ask_avi_deployment_ver', '20261118a', false);
   flush_rewrite_rules(false);
   do_action('litespeed_purge_all');
   if (class_exists('\LiteSpeed\Purge')) {

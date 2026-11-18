@@ -1,7 +1,12 @@
-import { ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
-import { useMemo, useState } from 'react';
-import { getTimeGreeting, STARTER_PROMPTS, VERIFIED_LINKS } from '../data/persona';
-import type { AttachedContext, EngineId, VoiceStyle } from '../types/chat';
+import { ChevronDown, ChevronUp, RefreshCw, Sparkles } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  selectDynamicGreeting,
+  type GreetingVisitorInput,
+  type SelectedGreeting,
+} from '../data/greetings';
+import { STARTER_PROMPTS, VERIFIED_LINKS } from '../data/persona';
+import type { AttachedContext, EngineId, ThemeMode, VoiceStyle } from '../types/chat';
 import { AviAvatar } from './AviAvatar';
 import { Composer } from './Composer';
 
@@ -25,6 +30,9 @@ interface WelcomeScreenProps {
   onOpenDossierPicker: () => void;
   isAdmin?: boolean;
   isAuthenticated?: boolean;
+  userName?: string;
+  threadCount?: number;
+  theme?: ThemeMode;
   onRequireSignIn?: (pendingEngineId?: EngineId) => void;
   proxyUrl?: string;
   sessionToken?: string;
@@ -53,6 +61,9 @@ export function WelcomeScreen({
   onOpenDossierPicker,
   isAdmin = false,
   isAuthenticated = false,
+  userName,
+  threadCount = 0,
+  theme = 'dark',
   onRequireSignIn,
   proxyUrl,
   sessionToken,
@@ -60,7 +71,44 @@ export function WelcomeScreen({
 }: WelcomeScreenProps) {
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const greeting = useMemo(() => getTimeGreeting(), []);
+
+  const visitorInput = useMemo<GreetingVisitorInput>(
+    () => ({
+      userName,
+      isAuthenticated,
+      threadCount,
+      voiceStyle,
+      engineId,
+      theme,
+    }),
+    [userName, isAuthenticated, threadCount, voiceStyle, engineId, theme]
+  );
+
+  const [greeting, setGreeting] = useState<SelectedGreeting>(() => selectDynamicGreeting(visitorInput));
+  const initialMountRef = useRef(true);
+
+  useEffect(() => {
+    if (initialMountRef.current) {
+      initialMountRef.current = false;
+      return;
+    }
+    setGreeting((prev) =>
+      selectDynamicGreeting({
+        ...visitorInput,
+        excludeIds: [prev.id],
+      })
+    );
+  }, [userName, voiceStyle, threadCount]);
+
+  const handleShuffleGreeting = () => {
+    setGreeting((prev) =>
+      selectDynamicGreeting({
+        ...visitorInput,
+        excludeIds: [prev.id],
+        skipVisitTracking: true,
+      })
+    );
+  };
 
   const visiblePrompts = useMemo(() => {
     if (selectedCategory === 'All') return STARTER_PROMPTS;
@@ -73,10 +121,20 @@ export function WelcomeScreen({
         <div className="welcome-hero">
           <div className="welcome-badge-row">
             <AviAvatar size={42} className="welcome-avatar" />
+            <button
+              type="button"
+              className="welcome-eyebrow"
+              onClick={handleShuffleGreeting}
+              title="Show another context-aware greeting"
+              aria-label={`Context telemetry: ${greeting.kicker}. Click for another greeting`}
+            >
+              <span>{greeting.kicker}</span>
+              <RefreshCw size={11} className="welcome-shuffle-icon" />
+            </button>
           </div>
 
           <h1 className="welcome-heading">
-            <span className="welcome-heading-line">{greeting}</span>
+            <span className="welcome-heading-line">{greeting.headline}</span>
             <span className="welcome-heading-line">
               <em>Ask Avi</em> anything.
             </span>

@@ -99,7 +99,35 @@ describe('Dynamic contextual greeting repository', () => {
     }
   });
 
-  it('renders transparent context kicker pill on WelcomeScreen and cycles greeting cleanly on click', () => {
+  it('keeps every greeting variation concise (<= 32 chars) for single-line hero display', () => {
+    const longSignals = resolveVisitorSignals({
+      now: new Date(2026, 10, 18, 3, 33, 0),
+      timeZone: 'America/Los_Angeles',
+      userName: 'Alexander Hamilton',
+      isAuthenticated: true,
+      threadCount: 12,
+      voiceStyle: 'standard',
+      corpusCount: 143,
+      skipVisitTracking: true,
+    });
+    const noCitySignals = {
+      ...longSignals,
+      cityLabel: '',
+      firstName: 'Christopherson-Alexandervon',
+      consecutiveDays: 14,
+    };
+
+    for (const entry of GREETING_REPOSITORY) {
+      const renderedLong = typeof entry.text === 'function' ? entry.text(longSignals) : entry.text;
+      expect(renderedLong.length, `${entry.id} (with long city/name): "${renderedLong}"`).toBeLessThanOrEqual(32);
+      expect(renderedLong.trim().length, `${entry.id} non-empty`).toBeGreaterThan(0);
+
+      const renderedFallback = typeof entry.text === 'function' ? entry.text(noCitySignals) : entry.text;
+      expect(renderedFallback.length, `${entry.id} (no-city fallback): "${renderedFallback}"`).toBeLessThanOrEqual(32);
+    }
+  });
+
+  it('renders only the centered avatar above the concise hero headline (no eyebrow pill)', () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -129,17 +157,14 @@ describe('Dynamic contextual greeting repository', () => {
       );
     });
 
-    const eyebrowBtn = container.querySelector<HTMLButtonElement>('.welcome-eyebrow');
-    expect(eyebrowBtn).not.toBeNull();
-    const firstHeadline = container.querySelector('.welcome-heading-line')?.textContent?.trim();
-    expect(firstHeadline).toBeTruthy();
+    expect(container.querySelector('.welcome-eyebrow')).toBeNull();
+    const badgeRow = container.querySelector('.welcome-badge-row');
+    expect(badgeRow).not.toBeNull();
+    expect(badgeRow?.querySelector('.welcome-avatar')).not.toBeNull();
+    expect(badgeRow?.children.length).toBe(1);
 
-    act(() => {
-      eyebrowBtn?.click();
-    });
-
-    const secondHeadline = container.querySelector('.welcome-heading-line')?.textContent?.trim();
-    expect(secondHeadline).toBeTruthy();
-    expect(secondHeadline).not.toBe(firstHeadline);
+    const firstHeadline = container.querySelector('.welcome-heading-line')?.textContent?.trim() ?? '';
+    expect(firstHeadline.length).toBeGreaterThan(5);
+    expect(firstHeadline.length).toBeLessThanOrEqual(32);
   });
 });

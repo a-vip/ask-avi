@@ -314,9 +314,16 @@ export function resolveVisitorSignals(input: GreetingVisitorInput = {}): Resolve
   };
 }
 
+function clipShort(value: string, maxLen: number): string {
+  const clean = value.trim();
+  if (clean.length <= maxLen) return clean;
+  return `${clean.slice(0, Math.max(1, maxLen - 1)).trimEnd()}…`;
+}
+
 /**
  * Curated repository of context-aware, witty, and intellectually engaging hero greetings
  * spanning circadian bands, temporal landmarks, timezone regions, visitor cadence, and mode cues.
+ * Every rendered variation is kept concise enough (<= 32 chars) to sit cleanly on a single hero line.
  */
 export const GREETING_REPOSITORY: GreetingEntry[] = [
   // ── 1. Wee Hours (00:00 – 04:59) ─────────────────────────────────────────
@@ -332,14 +339,14 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     category: 'circadian',
     weight: 4,
     when: (c) => c.circadianSlot === 'weeHours',
-    text: 'The sharpest footnotes get written after midnight.',
+    text: 'Best footnotes happen late.',
   },
   {
     id: 'wee-named-owl',
     category: 'circadian',
     weight: 5,
     when: (c) => c.circadianSlot === 'weeHours' && Boolean(c.firstName),
-    text: (c) => `Still awake, ${c.firstName}?`,
+    text: (c) => `Still awake, ${clipShort(c.firstName, 16)}?`,
   },
   {
     id: 'wee-sleep-or-hubris',
@@ -347,7 +354,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     weight: 4,
     playful: true,
     when: (c) => c.circadianSlot === 'weeHours',
-    text: (c) => `${c.formattedTime} clarity — or ${c.formattedTime} hubris?`,
+    text: (c) => `${c.formattedTime} genius — or hubris?`,
   },
   {
     id: 'wee-quiet-world',
@@ -355,7 +362,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     weight: 3,
     playful: true,
     when: (c) => c.circadianSlot === 'weeHours',
-    text: 'Up suspiciously late — or impossibly early?',
+    text: 'Up late, or up early?',
   },
   {
     id: 'wee-tea-stubbornness',
@@ -363,7 +370,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     weight: 3,
     playful: true,
     when: (c) => c.circadianSlot === 'weeHours',
-    text: 'Deep-night desk. Coffee, tea, or sheer stubbornness?',
+    text: 'Late desk. Coffee or hubris?',
   },
 
   // ── 2. Early Dawn (05:00 – 07:59) ────────────────────────────────────────
@@ -386,7 +393,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     category: 'circadian',
     weight: 3,
     when: (c) => c.circadianSlot === 'earlyDawn',
-    text: 'Quiet hours before the noise begins.',
+    text: 'Quiet hours before the noise.',
   },
   {
     id: 'dawn-coffee-clean-slate',
@@ -400,7 +407,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     category: 'circadian',
     weight: 5,
     when: (c) => c.circadianSlot === 'earlyDawn' && Boolean(c.firstName),
-    text: (c) => `Early start, ${c.firstName}.`,
+    text: (c) => `Early start, ${clipShort(c.firstName, 17)}.`,
   },
 
   // ── 3. Morning (08:00 – 11:59) ───────────────────────────────────────────
@@ -409,35 +416,35 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     category: 'circadian',
     weight: 3,
     when: (c) => c.circadianSlot === 'morning',
-    text: 'Ready once the coffee kicks in?',
+    text: 'Ready once coffee kicks in?',
   },
   {
     id: 'morn-briefing',
     category: 'circadian',
     weight: 4,
     when: (c) => c.circadianSlot === 'morning',
-    text: 'Morning briefing, minus the fluff.',
+    text: 'Morning briefing, zero fluff.',
   },
   {
     id: 'morn-stress-test',
     category: 'circadian',
     weight: 4,
     when: (c) => c.circadianSlot === 'morning',
-    text: 'Clear morning light for thorny questions.',
+    text: 'Clear light, thorny questions.',
   },
   {
     id: 'morn-on-desk',
     category: 'circadian',
     weight: 3,
     when: (c) => c.circadianSlot === 'morning',
-    text: 'Fresh morning page — what is on the desk?',
+    text: 'Morning. What is on the desk?',
   },
   {
     id: 'morn-named',
     category: 'circadian',
     weight: 5,
     when: (c) => c.circadianSlot === 'morning' && Boolean(c.firstName),
-    text: (c) => `Morning, ${c.firstName}. What deserves real focus today?`,
+    text: (c) => `Morning, ${clipShort(c.firstName, 20)}.`,
   },
 
   // ── 4. Midday (12:00 – 13:59) ────────────────────────────────────────────
@@ -453,14 +460,14 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     category: 'circadian',
     weight: 3,
     when: (c) => c.circadianSlot === 'midday',
-    text: 'Midday pause — or powering straight through?',
+    text: 'Lunch break, or powering on?',
   },
   {
     id: 'noon-sharper-angle',
     category: 'circadian',
     weight: 4,
     when: (c) => c.circadianSlot === 'midday',
-    text: 'Stepping out of endless tabs for a sharper angle?',
+    text: 'Hungry for a sharper angle?',
   },
   {
     id: 'noon-clarity',
@@ -483,7 +490,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     category: 'circadian',
     weight: 4,
     when: (c) => c.circadianSlot === 'afternoon',
-    text: 'Deep-work hour. Bring a proper problem.',
+    text: 'Deep work. Bring a problem.',
   },
   {
     id: 'aft-second-wind',
@@ -498,14 +505,14 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     category: 'circadian',
     weight: 3,
     when: (c) => c.circadianSlot === 'afternoon',
-    text: 'Afternoon desk check — what still feels half-baked?',
+    text: 'What still feels half-baked?',
   },
   {
     id: 'aft-named',
     category: 'circadian',
     weight: 5,
     when: (c) => c.circadianSlot === 'afternoon' && Boolean(c.firstName),
-    text: (c) => `Afternoon, ${c.firstName}. What are we pulling apart today?`,
+    text: (c) => `Afternoon, ${clipShort(c.firstName, 18)}.`,
   },
 
   // ── 6. Golden Hour (17:00 – 18:59) ───────────────────────────────────────
@@ -521,21 +528,21 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     category: 'circadian',
     weight: 4,
     when: (c) => c.circadianSlot === 'goldenHour',
-    text: 'Catching dusk before calling it a day?',
+    text: 'One question before dusk?',
   },
   {
     id: 'gold-synthesis',
     category: 'circadian',
     weight: 4,
     when: (c) => c.circadianSlot === 'goldenHour',
-    text: 'Five o’clock synthesis beats tomorrow’s panic.',
+    text: 'Five o’clock clarity check.',
   },
   {
     id: 'gold-last-thread',
     category: 'circadian',
     weight: 3,
     when: (c) => c.circadianSlot === 'goldenHour',
-    text: 'Dusk over the desk — one last crisp thread?',
+    text: 'Dusk desk — one last thread?',
   },
 
   // ── 7. Evening (19:00 – 21:59) ───────────────────────────────────────────
@@ -544,7 +551,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     category: 'circadian',
     weight: 4,
     when: (c) => c.circadianSlot === 'evening',
-    text: 'Quiet evening for unhurried thinking.',
+    text: 'Unhurried evening thinking.',
   },
   {
     id: 'eve-off-clock',
@@ -558,21 +565,21 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     category: 'circadian',
     weight: 4,
     when: (c) => c.circadianSlot === 'evening',
-    text: 'Evening reading, minus the social-feed algorithm.',
+    text: 'Reading, minus the algorithm.',
   },
   {
     id: 'eve-philosophy-debug',
     category: 'circadian',
     weight: 4,
     when: (c) => c.circadianSlot === 'evening',
-    text: 'Evening shift: jurisprudence, Spinoza, or stubborn code?',
+    text: 'Law, Spinoza, or broken code?',
   },
   {
     id: 'eve-named',
     category: 'circadian',
     weight: 5,
     when: (c) => c.circadianSlot === 'evening' && Boolean(c.firstName),
-    text: (c) => `Evening, ${c.firstName}. What is keeping the mind occupied?`,
+    text: (c) => `Evening, ${clipShort(c.firstName, 20)}.`,
   },
 
   // ── 8. Late Night (22:00 – 23:59) ────────────────────────────────────────
@@ -581,21 +588,21 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     category: 'circadian',
     weight: 4,
     when: (c) => c.circadianSlot === 'lateNight',
-    text: 'Late-night curiosity hits differently.',
+    text: 'Night air, sharper questions.',
   },
   {
     id: 'night-winding-down',
     category: 'circadian',
     weight: 4,
     when: (c) => c.circadianSlot === 'lateNight',
-    text: 'Winding down, or just getting started?',
+    text: 'Winding down, or starting?',
   },
   {
     id: 'night-rabbit-hole',
     category: 'circadian',
     weight: 4,
     when: (c) => c.circadianSlot === 'lateNight',
-    text: 'One honest rabbit hole before sleep?',
+    text: 'One rabbit hole before sleep?',
   },
   {
     id: 'night-tabs-open',
@@ -603,7 +610,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     weight: 4,
     playful: true,
     when: (c) => c.circadianSlot === 'lateNight',
-    text: 'Night-owl hours — what is keeping twenty tabs open?',
+    text: 'Still got twenty tabs open?',
   },
 
   // ── 9. Temporal Landmarks & Fresh-Start Triggers ─────────────────────────
@@ -612,7 +619,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     category: 'landmark',
     weight: 5,
     when: (c) => c.dayOfWeek === 1 && c.hour < 13,
-    text: 'Monday reset — what is actually worth solving this week?',
+    text: 'Monday reset. What matters?',
   },
   {
     id: 'land-monday-hypothesis',
@@ -626,7 +633,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     category: 'landmark',
     weight: 3,
     when: (c) => c.dayOfWeek === 3,
-    text: 'Midweek reality check — what holds up under scrutiny?',
+    text: 'Midweek reality check.',
   },
   {
     id: 'land-friday-escape',
@@ -634,28 +641,28 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     weight: 5,
     playful: true,
     when: (c) => c.dayOfWeek === 5 && c.hour >= 14,
-    text: 'Friday escape from spreadsheets?',
+    text: 'Friday off the spreadsheet?',
   },
   {
     id: 'land-friday-one-question',
     category: 'landmark',
     weight: 4,
     when: (c) => c.dayOfWeek === 5,
-    text: 'Before the weekend — one proper question?',
+    text: 'One last Friday question?',
   },
   {
     id: 'land-weekend-best',
     category: 'landmark',
     weight: 5,
     when: (c) => c.dayOfWeek === 0 || c.dayOfWeek === 6,
-    text: 'Weekend curiosity is usually the sharpest kind.',
+    text: 'Weekend curiosity hits best.',
   },
   {
     id: 'land-saturday-no-meetings',
     category: 'landmark',
     weight: 4,
     when: (c) => c.dayOfWeek === 6,
-    text: 'Saturday thoughts, zero committee meetings.',
+    text: 'Saturday. Zero meetings.',
   },
   {
     id: 'land-sunday-slow-read',
@@ -669,28 +676,28 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     category: 'landmark',
     weight: 5,
     when: (c) => c.dayOfWeek === 0 && c.hour >= 18,
-    text: 'Sunday evening reset — mapping the week ahead?',
+    text: 'Sunday reset before Monday.',
   },
   {
     id: 'land-month-start',
     category: 'landmark',
     weight: 5,
     when: (c) => c.dayOfMonth === 1,
-    text: 'First of the month — clean slate for tougher questions.',
+    text: 'New month, tougher questions.',
   },
   {
     id: 'land-new-year',
     category: 'landmark',
     weight: 5,
     when: (c) => c.month === 0 && c.dayOfMonth <= 10,
-    text: 'Fresh calendar. Which assumptions are we retiring this year?',
+    text: 'New year, cleaner priors.',
   },
   {
     id: 'land-winter-reading',
     category: 'landmark',
     weight: 3,
     when: (c) => c.season === 'winter',
-    text: 'Winter desk weather — good day for deep reading.',
+    text: 'Winter weather for deep reads.',
   },
   {
     id: 'land-autumn-sharp',
@@ -706,35 +713,35 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     category: 'region',
     weight: 5,
     when: (c) => c.regionBucket === 'london',
-    text: 'Checking in from London time — tea poured?',
+    text: 'London hours — tea poured?',
   },
   {
     id: 'reg-london-cambridge',
     category: 'region',
     weight: 4,
     when: (c) => c.regionBucket === 'london',
-    text: 'Greenwich meridian hours. Rain outside, first principles inside?',
+    text: 'Greenwich hours. Rain outside?',
   },
   {
     id: 'reg-bangkok-slow',
     category: 'region',
     weight: 5,
     when: (c) => c.regionBucket === 'bangkok',
-    text: 'Bangkok time — slowing down enough to look clearly?',
+    text: 'Bangkok time — think clearly.',
   },
   {
     id: 'reg-bangkok-evening',
     category: 'region',
     weight: 5,
     when: (c) => c.regionBucket === 'bangkok' && c.hour >= 17,
-    text: 'Chao Phraya twilight suits thornier questions.',
+    text: 'Chao Phraya twilight.',
   },
   {
     id: 'reg-bangkok-iced',
     category: 'region',
     weight: 4,
     when: (c) => c.regionBucket === 'bangkok' && c.hour >= 7 && c.hour < 17,
-    text: 'Thailand hours — iced espresso and a live thesis?',
+    text: 'Bangkok desk — iced espresso?',
   },
   {
     id: 'reg-europe-geneva',
@@ -743,8 +750,8 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     when: (c) => c.regionBucket === 'europe',
     text: (c) =>
       c.cityLabel
-        ? `Joining from ${c.cityLabel} time — treaty prose or system design?`
-        : 'Continental hours — treaty prose or system architecture?',
+        ? `${clipShort(c.cityLabel, 12)} time — law or code?`
+        : 'European hours. Test a thesis.',
   },
   {
     id: 'reg-americas-clock',
@@ -753,8 +760,8 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     when: (c) => c.regionBucket === 'americas',
     text: (c) =>
       c.cityLabel
-        ? `Across the pond on ${c.cityLabel} time — what is in focus?`
-        : 'Across the Atlantic — what is on your desk today?',
+        ? `${clipShort(c.cityLabel, 13)} — in focus today?`
+        : 'Across the pond today?',
   },
   {
     id: 'reg-sea-clock',
@@ -762,7 +769,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     weight: 4,
     when: (c) => c.regionBucket === 'south_east_asia',
     text: (c) =>
-      c.cityLabel ? `Hello from Southeast Asian hours (${c.cityLabel}).` : 'Southeast Asian hours — welcome in.',
+      c.cityLabel ? `${clipShort(c.cityLabel, 14)} hours — welcome.` : 'Southeast Asia hours.',
   },
   {
     id: 'reg-south-asia-colombo',
@@ -771,15 +778,16 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     when: (c) => c.regionBucket === 'south_asia',
     text: (c) =>
       c.cityLabel
-        ? `On ${c.cityLabel} time today — tea on, questions ready?`
-        : 'South Asian hours — tea on, questions ready?',
+        ? `${clipShort(c.cityLabel, 12)} hours — tea ready?`
+        : 'South Asian hours — tea ready?',
   },
   {
     id: 'reg-east-asia',
     category: 'region',
     weight: 4,
     when: (c) => c.regionBucket === 'east_asia',
-    text: (c) => (c.cityLabel ? `${c.cityLabel} clock — deep into something good?` : 'East Asia hours — ready when you are.'),
+    text: (c) =>
+      c.cityLabel ? `${clipShort(c.cityLabel, 12)} clock — digging in?` : 'East Asia hours — ready.',
   },
   {
     id: 'reg-oceania',
@@ -787,14 +795,14 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     weight: 4,
     when: (c) => c.regionBucket === 'oceania',
     text: (c) =>
-      c.cityLabel ? `Future calling from ${c.cityLabel} time — what is first on your mind?` : 'Ahead of the global clock today.',
+      c.cityLabel ? `Tomorrow calling, ${clipShort(c.cityLabel, 12)}?` : 'Ahead of the global clock.',
   },
   {
     id: 'reg-city-fallback',
     category: 'region',
     weight: 3,
     when: (c) => Boolean(c.cityLabel) && c.regionBucket === 'global',
-    text: (c) => `Checking in on ${c.cityLabel} time.`,
+    text: (c) => `Checking in from ${clipShort(c.cityLabel, 13)}.`,
   },
 
   // ── 11. Visitor Cadence, Auth Name & History Measures ────────────────────
@@ -803,56 +811,56 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     category: 'cadence',
     weight: 5,
     when: (c) => c.threadCount === 0 && c.visitCount <= 1,
-    text: 'Pull up a chair — I have read my own archive so you do not have to.',
+    text: 'Pull up a chair. Start sharp.',
   },
   {
     id: 'cad-first-timer-sparring',
     category: 'cadence',
     weight: 4,
     when: (c) => c.threadCount === 0 && c.visitCount <= 1,
-    text: 'First visit here? Start anywhere.',
+    text: 'First visit? Start anywhere.',
   },
   {
     id: 'cad-back-at-it-named',
     category: 'cadence',
     weight: 6,
     when: (c) => Boolean(c.firstName) && (c.threadCount >= 1 || c.visitCount >= 2),
-    text: (c) => `Back at it, ${c.firstName}.`,
+    text: (c) => `Back at it, ${clipShort(c.firstName, 18)}.`,
   },
   {
     id: 'cad-back-same-day',
     category: 'cadence',
     weight: 5,
     when: (c) => c.hoursSinceLastVisit !== null && c.hoursSinceLastVisit < 6 && c.visitCount >= 2,
-    text: 'Back already — another angle occurred to you?',
+    text: 'Back for a sharper angle?',
   },
   {
     id: 'cad-back-after-gap',
     category: 'cadence',
     weight: 5,
     when: (c) => c.hoursSinceLastVisit !== null && c.hoursSinceLastVisit >= 24 * 7,
-    text: 'Been a little while. What changed since last time?',
+    text: 'Been a while. What changed?',
   },
   {
     id: 'cad-streak',
     category: 'cadence',
     weight: 5,
     when: (c) => c.consecutiveDays >= 3,
-    text: (c) => `Day ${c.consecutiveDays} back on the desk — momentum looks good.`,
+    text: (c) => `Day ${c.consecutiveDays} streak. Momentum holds.`,
   },
   {
     id: 'cad-power-threads',
     category: 'cadence',
     weight: 4,
     when: (c) => c.threadCount >= 4,
-    text: (c) => `${c.threadCount} conversations in and counting — bring a tougher test.`,
+    text: (c) => `${c.threadCount} threads in. Test me harder.`,
   },
   {
     id: 'cad-returning-anon',
     category: 'cadence',
     weight: 4,
     when: (c) => c.visitCount >= 2 && !c.firstName,
-    text: 'Round two — continuing a thread or opening a clean frontier?',
+    text: 'Round two. What is next?',
   },
 
   // ── 12. Voice, Theme & Corpus Context ────────────────────────────────────
@@ -861,35 +869,35 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     category: 'context',
     weight: 6,
     when: (c) => c.voiceStyle === 'blunt',
-    text: 'Blunt mode on — skip the diplomacy, bring the thesis.',
+    text: 'Blunt mode. Skip diplomacy.',
   },
   {
     id: 'ctx-academic-mode',
     category: 'context',
     weight: 6,
     when: (c) => c.voiceStyle === 'academic',
-    text: 'Treaty prose and footnotes on standby.',
+    text: 'Treaty footnotes on standby.',
   },
   {
     id: 'ctx-mentor-mode',
     category: 'context',
     weight: 6,
     when: (c) => c.voiceStyle === 'mentor',
-    text: 'Coffee-table candour mode. What are you wrestling with?',
+    text: 'Candid mode. Speak plainly.',
   },
   {
     id: 'ctx-dark-night',
     category: 'context',
     weight: 4,
     when: (c) => c.theme === 'dark' && (c.hour >= 19 || c.hour < 6),
-    text: 'Obsidian mode on. Quiet room for dense ideas.',
+    text: 'Dark room for dense ideas.',
   },
   {
     id: 'ctx-corpus-count',
     category: 'context',
     weight: 4,
     when: (c) => c.corpusCount >= 50,
-    text: (c) => `${c.corpusCount} essays & notes indexed — challenge any claim.`,
+    text: (c) => `${c.corpusCount} notes indexed. Probe any.`,
   },
   {
     id: 'ctx-british-spelling',
@@ -897,7 +905,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     weight: 3,
     playful: true,
     when: (c) => !c.isBritishLocale,
-    text: 'Pardon the extra “u”s — thinking in British English.',
+    text: 'Mind the extra “u”s today.',
   },
 
   // ── 13. Engaging Questions, Wit & First-Principles Prompts (Always Valid) ─
@@ -905,13 +913,13 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     id: 'wit-how-help',
     category: 'wit',
     weight: 3,
-    text: 'How can I help you think clearly today?',
+    text: 'How can I help you think?',
   },
   {
     id: 'wit-break-argument',
     category: 'wit',
     weight: 4,
-    text: 'Which argument are you hoping I will stress-test?',
+    text: 'What should we stress-test?',
   },
   {
     id: 'wit-thorny',
@@ -923,81 +931,81 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     id: 'wit-mid-thought',
     category: 'wit',
     weight: 4,
-    text: 'No preamble needed — start mid-thought.',
+    text: 'Skip preamble. Start sharp.',
   },
   {
     id: 'wit-provoke-wrong',
     category: 'wit',
     weight: 4,
-    text: 'Convince me I got something wrong in my essays.',
+    text: 'Show me where I got it wrong.',
   },
   {
     id: 'wit-menu-triad',
     category: 'wit',
     weight: 3,
     playful: true,
-    text: 'Philosophy, international law, or code that refuses to compile?',
+    text: 'Philosophy, law, or bad code?',
   },
   {
     id: 'wit-unstated-assumption',
     category: 'wit',
     weight: 4,
-    text: 'Got an unstated assumption? Let us pull the thread.',
+    text: 'Got an unstated premise?',
   },
   {
     id: 'wit-hunch-or-thesis',
     category: 'wit',
     weight: 3,
-    text: 'Half-formed hunch, or fully drafted thesis?',
+    text: 'Rough hunch, or draft thesis?',
   },
   {
     id: 'wit-reading-between',
     category: 'wit',
     weight: 3,
-    text: 'What are we reading between the lines of today?',
+    text: 'Read between the lines today?',
   },
   {
     id: 'wit-incentives',
     category: 'wit',
     weight: 3,
-    text: 'Follow the incentives first; evaluate the slogans after.',
+    text: 'Trace the incentives first.',
   },
   {
     id: 'wit-small-talk-optional',
     category: 'wit',
     weight: 4,
-    text: 'Sharp questions welcome; small talk optional.',
+    text: 'Sharp questions, zero fluff.',
   },
   {
     id: 'wit-evidence-receipt',
     category: 'wit',
     weight: 3,
-    text: 'Show me the receipt, or bring the paradox.',
+    text: 'Receipts or paradoxes today?',
   },
   {
     id: 'wit-consequences',
     category: 'wit',
     weight: 3,
-    text: 'Wait until the second-order effects show up — let us trace them.',
+    text: 'Trace second-order effects.',
   },
   {
     id: 'wit-spinoza-to-python',
     category: 'wit',
     weight: 3,
     playful: true,
-    text: 'Spinoza on the desk, or Python in the terminal?',
+    text: 'Spinoza or Python today?',
   },
   {
     id: 'wit-control-arch',
     category: 'wit',
     weight: 3,
-    text: 'Good conversation starts where polite consensus stops.',
+    text: 'Start past polite consensus.',
   },
   {
     id: 'wit-ask-twice',
     category: 'wit',
     weight: 3,
-    text: 'Always cheaper to challenge a premise here than in production.',
+    text: 'Break the premise early.',
   },
 ];
 

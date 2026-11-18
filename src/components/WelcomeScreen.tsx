@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, RefreshCw, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   selectDynamicGreeting,
@@ -100,16 +100,6 @@ export function WelcomeScreen({
     );
   }, [userName, voiceStyle, threadCount]);
 
-  const handleShuffleGreeting = () => {
-    setGreeting((prev) =>
-      selectDynamicGreeting({
-        ...visitorInput,
-        excludeIds: [prev.id],
-        skipVisitTracking: true,
-      })
-    );
-  };
-
   const visiblePrompts = useMemo(() => {
     if (selectedCategory === 'All') return STARTER_PROMPTS;
     return STARTER_PROMPTS.filter((p) => p.category === selectedCategory);
@@ -121,16 +111,6 @@ export function WelcomeScreen({
         <div className="welcome-hero">
           <div className="welcome-badge-row">
             <AviAvatar size={42} className="welcome-avatar" />
-            <button
-              type="button"
-              className="welcome-eyebrow"
-              onClick={handleShuffleGreeting}
-              title="Show another context-aware greeting"
-              aria-label={`Context telemetry: ${greeting.kicker}. Click for another greeting`}
-            >
-              <span>{greeting.kicker}</span>
-              <RefreshCw size={11} className="welcome-shuffle-icon" />
-            </button>
           </div>
 
           <h1 className="welcome-heading">

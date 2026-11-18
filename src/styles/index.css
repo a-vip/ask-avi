@@ -865,7 +865,8 @@ a {
 
 .welcome-hero {
   text-align: center;
-  max-width: 640px;
+  width: 100%;
+  max-width: 760px;
 }
 
 .welcome-badge-row {

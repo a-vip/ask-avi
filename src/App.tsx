@@ -9,10 +9,13 @@ import { TopBar } from './components/TopBar';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { ENGINE_OPTIONS } from './data/persona';
 import { AuthRequiredError, BackendNotConfiguredError, llmService } from './engine/llmService';
+import { knowledgeIndex } from './engine/rag';
 import {
   fetchAuthConfig,
   isVerifiedAdmin,
   reportClientTelemetry,
+  reportCompletedQaTurn,
+  resolveEffectiveAuthUrl,
   type AuthConfigResponse,
 } from './utils/authClient';
 import { allocateContextBudget, getContextBudgetLimits } from './utils/contextExtractor';
@@ -232,6 +235,10 @@ export default function App() {
     };
   }, [settings.proxyUrl]);
 
+  useEffect(() => {
+    void knowledgeIndex.syncLiveWordPressKnowledge(resolveEffectiveAuthUrl(settings.proxyUrl));
+  }, [settings.proxyUrl]);
+
   const handleClearAllThreads = useCallback(() => {
     setThreads([]);
     setActiveThreadId(null);
@@ -311,6 +318,8 @@ export default function App() {
       shouldAutoScrollRef.current = true;
 
       const engineToUse = overrideEngineId ?? settings.engineId;
+      const turnIndex = historyBeforeQuery.filter((m) => m.role === 'user').length + 1;
+      const turnId = `turn_${assistantMsgId}`;
 
       try {
         const result = await llmService.generateReply({
@@ -319,6 +328,9 @@ export default function App() {
           engineId: engineToUse,
           voiceStyle: settings.voiceStyle,
           webSearchEnabled: settings.webSearchEnabled,
+          turnId,
+          threadId,
+          turnIndex,
           groqApiKey: settings.groqApiKey,
           openRouterApiKey: settings.openRouterApiKey,
           geminiApiKey: settings.geminiApiKey,
@@ -338,6 +350,7 @@ export default function App() {
                       thoughts: update.thoughts,
                       isThinking: update.isThinking,
                       thinkingMs: update.thinkingMs,
+                      thinkingPhase: update.thinkingPhase,
                       webSearchQueries: update.webSearchQueries,
                       webSources: update.webSources,
                     }
@@ -356,17 +369,58 @@ export default function App() {
                   thoughts: result.thoughts,
                   isThinking: false,
                   thinkingMs: result.thinkingMs,
+                  thinkingPhase: undefined,
                   webSearchQueries: result.webSearchQueries,
                   webSources: result.webSources,
                   engineUsed: result.engineUsed,
                   modelLabel: result.modelLabel,
                   sources: result.sources,
                   retrievalMs: result.retrievalMs,
+                  topRagScore: result.topRagScore,
+                  ragMatchCount: result.ragMatchCount,
+                  isContentGap: result.isContentGap,
+                  gapTopic: result.gapTopic,
+                  complexityTier: result.complexityTier,
                   followUps: result.followUps,
                   isStreaming: false,
                 }
               : m
           )
+        );
+
+        void reportCompletedQaTurn(
+          {
+            turnId,
+            threadId,
+            turnIndex,
+            promptText: queryText,
+            answerText: result.content,
+            thoughtsText: result.thoughts,
+            citedSources: [
+              ...(result.sources ?? []).map((s) => ({
+                index: s.index,
+                title: s.entry.title,
+                url: s.entry.url,
+                kind: 'archive' as const,
+              })),
+              ...(result.webSources ?? []).map((w) => ({
+                index: w.index,
+                title: w.title,
+                url: w.url,
+                kind: 'web' as const,
+              })),
+            ],
+            topRagScore: result.topRagScore,
+            ragMatchCount: result.ragMatchCount,
+            isContentGap: result.isContentGap,
+            gapTopic: result.gapTopic,
+            engineId: result.engineUsed,
+            modelUsed: result.modelLabel,
+            voiceStyle: settings.voiceStyle,
+            latencyMs: result.thinkingMs,
+          },
+          userProfile?.sessionToken,
+          settings.proxyUrl
         );
       } catch (err) {
         const isAbort = err instanceof DOMException && err.name === 'AbortError';
@@ -806,8 +860,15 @@ export default function App() {
                   key={msg.id}
                   message={msg}
                   isLastAssistant={msg.id === lastAssistantId}
+                  assistantTurnCount={
+                    activeThread!.messages.filter((m) => m.role === 'assistant').length
+                  }
                   isAdmin={isAdmin}
                   wpAdminUrl={authConfig?.wpAdminUrl}
+                  userEmail={userProfile?.email}
+                  isMarketingOptedIn={Boolean(userProfile?.marketingOptIn)}
+                  proxyUrl={settings.proxyUrl}
+                  sessionToken={userProfile?.sessionToken}
                   onEditUserMessage={handleEditUserMessage}
                   onRegenerate={handleRegenerate}
                   onFollowUpClick={(prompt) => handleSubmitPrompt(prompt)}

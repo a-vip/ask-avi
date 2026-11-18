@@ -292,6 +292,79 @@ export async function reportClientTelemetry(
   }
 }
 
+export interface QaTurnReportPayload {
+  turnId: string;
+  threadId?: string;
+  turnIndex?: number;
+  promptText: string;
+  answerText: string;
+  thoughtsText?: string;
+  citedSources?: Array<{ index: number; title: string; url: string; kind: 'archive' | 'web' }>;
+  topRagScore?: number;
+  ragMatchCount?: number;
+  isContentGap?: boolean;
+  gapTopic?: string;
+  engineId?: string;
+  modelUsed?: string;
+  voiceStyle?: string;
+  latencyMs?: number;
+}
+
+export async function reportCompletedQaTurn(
+  payload: QaTurnReportPayload,
+  sessionToken?: string,
+  customProxyUrl?: string
+): Promise<void> {
+  const authUrl = resolveEffectiveAuthUrl(customProxyUrl);
+  if (!authUrl || !payload.promptText.trim()) return;
+  try {
+    await fetch(authUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+      },
+      body: JSON.stringify({
+        action: 'record_qa_turn',
+        ...payload,
+      }),
+    });
+  } catch {
+    // Non-blocking Q&A archival
+  }
+}
+
+export async function subscribeToDispatch(
+  email: string,
+  topicHint?: string,
+  sessionToken?: string,
+  customProxyUrl?: string
+): Promise<{ ok: boolean; email: string }> {
+  const authUrl = resolveEffectiveAuthUrl(customProxyUrl);
+  if (!authUrl) {
+    throw new Error('Dispatch subscription endpoint is unavailable on this origin.');
+  }
+  const res = await fetch(authUrl, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+    },
+    body: JSON.stringify({
+      action: 'subscribe_dispatch',
+      email: email.trim(),
+      topicHint: topicHint ?? '',
+    }),
+  });
+  const data = await parseAuthJson<{ email?: string }>(res);
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || `Subscription failed (${res.status}).`);
+  }
+  return { ok: true, email: data.email || email.trim() };
+}
+
 let googleScriptPromise: Promise<void> | null = null;
 
 export function loadGoogleIdentityScript(): Promise<void> {

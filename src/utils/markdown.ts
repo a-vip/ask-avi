@@ -52,6 +52,10 @@ export interface CitationTarget {
   url?: string;
   doi?: string;
   title?: string;
+  snippet?: string;
+  category?: string;
+  date?: string;
+  kind?: 'archive' | 'web';
 }
 
 export function resolveSourceUrl(url?: string, doi?: string): string {

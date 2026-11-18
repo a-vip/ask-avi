@@ -86,6 +86,7 @@ export interface GreetingEntry {
   id: string;
   category: GreetingCategory;
   weight?: number;
+  playful?: boolean;
   when?: (ctx: ResolvedVisitorSignals) => boolean;
   text: string | ((ctx: ResolvedVisitorSignals) => string);
 }
@@ -344,6 +345,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     id: 'wee-sleep-or-hubris',
     category: 'circadian',
     weight: 4,
+    playful: true,
     when: (c) => c.circadianSlot === 'weeHours',
     text: (c) => `${c.formattedTime} clarity — or ${c.formattedTime} hubris?`,
   },
@@ -351,6 +353,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     id: 'wee-quiet-world',
     category: 'circadian',
     weight: 3,
+    playful: true,
     when: (c) => c.circadianSlot === 'weeHours',
     text: 'Up suspiciously late — or impossibly early?',
   },
@@ -358,6 +361,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     id: 'wee-tea-stubbornness',
     category: 'circadian',
     weight: 3,
+    playful: true,
     when: (c) => c.circadianSlot === 'weeHours',
     text: 'Deep-night desk. Coffee, tea, or sheer stubbornness?',
   },
@@ -485,6 +489,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     id: 'aft-second-wind',
     category: 'circadian',
     weight: 3,
+    playful: true,
     when: (c) => c.circadianSlot === 'afternoon',
     text: 'Second wind or third espresso?',
   },
@@ -596,6 +601,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     id: 'night-tabs-open',
     category: 'circadian',
     weight: 4,
+    playful: true,
     when: (c) => c.circadianSlot === 'lateNight',
     text: 'Night-owl hours — what is keeping twenty tabs open?',
   },
@@ -626,6 +632,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     id: 'land-friday-escape',
     category: 'landmark',
     weight: 5,
+    playful: true,
     when: (c) => c.dayOfWeek === 5 && c.hour >= 14,
     text: 'Friday escape from spreadsheets?',
   },
@@ -888,6 +895,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     id: 'ctx-british-spelling',
     category: 'context',
     weight: 3,
+    playful: true,
     when: (c) => !c.isBritishLocale,
     text: 'Pardon the extra “u”s — thinking in British English.',
   },
@@ -927,6 +935,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     id: 'wit-menu-triad',
     category: 'wit',
     weight: 3,
+    playful: true,
     text: 'Philosophy, international law, or code that refuses to compile?',
   },
   {
@@ -975,6 +984,7 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     id: 'wit-spinoza-to-python',
     category: 'wit',
     weight: 3,
+    playful: true,
     text: 'Spinoza on the desk, or Python in the terminal?',
   },
   {
@@ -992,7 +1002,10 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
 ];
 
 export function getEligibleGreetings(signals: ResolvedVisitorSignals): GreetingEntry[] {
-  return GREETING_REPOSITORY.filter((entry) => !entry.when || entry.when(signals));
+  const seriousOnly = signals.voiceStyle === 'academic' || signals.voiceStyle === 'blunt';
+  return GREETING_REPOSITORY.filter(
+    (entry) => (!seriousOnly || !entry.playful) && (!entry.when || entry.when(signals))
+  );
 }
 
 export function buildGreetingKicker(signals: ResolvedVisitorSignals): string {

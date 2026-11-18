@@ -1,7 +1,9 @@
-import { BookOpen, ExternalLink, MessageSquarePlus, Paperclip, Search, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { BookOpen, ExternalLink, MessageSquarePlus, Paperclip, Search, Sparkles, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { knowledgeIndex } from '../engine/rag';
 import type { KnowledgeEntry, RetrievedSource } from '../types/chat';
+
+export const JUST_PUBLISHED_FILTER = '✦ Just Published';
 
 interface KnowledgeDrawerProps {
   isOpen: boolean;
@@ -27,14 +29,38 @@ export function KnowledgeDrawer({
   );
   const [query, setQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [revision, setRevision] = useState(0);
 
-  const categories = useMemo(() => knowledgeIndex.getCategories(), []);
-  const allEntries = useMemo(() => knowledgeIndex.getAllEntries(), []);
+  useEffect(() => {
+    return knowledgeIndex.subscribe(() => {
+      setRevision((r) => r + 1);
+    });
+  }, []);
+
+  const categories = useMemo(() => {
+    const base = knowledgeIndex.getCategories();
+    const justCount = knowledgeIndex.getJustPublishedEntries().length;
+    if (justCount === 0) return base;
+    return [base[0], JUST_PUBLISHED_FILTER, ...base.slice(1)];
+  }, [revision]);
+
+  const allEntries = useMemo(() => knowledgeIndex.getAllEntries(), [revision]);
 
   const filteredEntries = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return allEntries.filter((entry) => {
-      if (selectedCategory !== 'All' && entry.category !== selectedCategory) return false;
+    const baseList =
+      selectedCategory === JUST_PUBLISHED_FILTER
+        ? knowledgeIndex.getJustPublishedEntries()
+        : allEntries;
+
+    return baseList.filter((entry) => {
+      if (
+        selectedCategory !== 'All' &&
+        selectedCategory !== JUST_PUBLISHED_FILTER &&
+        entry.category !== selectedCategory
+      ) {
+        return false;
+      }
       if (!q) return true;
       return (
         entry.title.toLowerCase().includes(q) ||
@@ -53,7 +79,10 @@ export function KnowledgeDrawer({
       <div className="drawer-header">
         <div className="drawer-title-group">
           <BookOpen size={17} />
-          <h2>Avi Knowledge Archive</h2>
+          <div>
+            <h2>Avi Knowledge Archive</h2>
+            <span className="proxy-grounding-tag">AI Proxy Corpus · Grounded in Avi Perera&apos;s writings</span>
+          </div>
         </div>
         <button
           type="button"
@@ -165,6 +194,12 @@ export function KnowledgeDrawer({
             {filteredEntries.map((entry) => (
               <div key={entry.id} className="dossier-card">
                 <div className="dossier-meta">
+                  {entry.justPublished && (
+                    <span className="dossier-just-published-badge">
+                      <Sparkles size={10} />
+                      <span>Just Published</span>
+                    </span>
+                  )}
                   <span className="dossier-cat">{entry.category}</span>
                   {entry.date && <span className="dossier-date">{entry.date}</span>}
                 </div>

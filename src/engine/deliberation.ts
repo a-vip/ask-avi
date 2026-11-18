@@ -1,5 +1,7 @@
-import type { ChatMessage } from '../types/chat';
+import type { ChatMessage, VoiceStyle } from '../types/chat';
 import { extractSearchKeywords } from './webFallback';
+
+export type QueryComplexityTier = 'fast-trivial' | 'focused-direct' | 'deep-deliberative';
 
 export interface PlannerResult {
   coreQuestion: string;
@@ -12,6 +14,51 @@ export interface PlannerResult {
 
 const TRIVIAL_GREETING_RE =
   /^(hi|hello|hey|hiya|yo|sup|good\s+(?:morning|afternoon|evening)|thanks|thank\s+you|ok|okay|cheers)[!.,?\s]*$/i;
+
+const HIGH_STAKES_SERIOUS_RE =
+  /\b(lethal autonomous|autonomous weapons?|killer robots?|article\s*36|martens clause|international humanitarian law|\bihl\b|war crimes?|genocide|civilian harm|civilian casualties|targeting decisions?|lavender|gaza|ccw gge|criminal liability|director liability|personal crisis|suicide|self-harm|grief|bereavement)\b/i;
+
+const DEEP_ANALYTICAL_RE =
+  /\b(why|how|spinoza|conatus|law|legal|ihl|article|treaty|control|governance|regulation|compare|contrast|difference|diverge|critique|counter|tension|paradox|ethics|philosophy|religion|buddhist|belief|architecture|imposter|superposition|context|explain|analyse|analyze|evaluate|debate|argument)\b/i;
+
+const FOCUSED_DIRECT_LOOKUP_RE =
+  /\b(email|contact|calendly|orcid|wikidata|github|url|link|website|where (do|did) you (live|study|grow up)|what is your (email|name|role|website)|when were you|who founded sovdash)\b/i;
+
+export function isHighStakesSeriousQuery(query: string): boolean {
+  return HIGH_STAKES_SERIOUS_RE.test(query);
+}
+
+/**
+ * Task-calibrated complexity classifier aligned with "Slow AI" HCI research (Tan et al., arXiv:2604.06183):
+ * trivial openings stay instantaneous, direct factual/contact lookups take a concise focused route,
+ * and substantive analytical/personal/legal questions receive full multi-pass deliberation.
+ */
+export function classifyQueryComplexity(
+  query: string,
+  history: ChatMessage[],
+  hasAttachments = false
+): { tier: QueryComplexityTier; isHighStakesSerious: boolean } {
+  const isHighStakesSerious = isHighStakesSeriousQuery(query);
+  if (isTrivialOpeningGreeting(query, history)) {
+    return { tier: 'fast-trivial', isHighStakesSerious };
+  }
+
+  const trimmed = query.trim();
+  const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+  if (
+    history.length === 0 &&
+    !hasAttachments &&
+    !isHighStakesSerious &&
+    wordCount <= 11 &&
+    trimmed.length <= 75 &&
+    FOCUSED_DIRECT_LOOKUP_RE.test(trimmed) &&
+    !DEEP_ANALYTICAL_RE.test(trimmed)
+  ) {
+    return { tier: 'focused-direct', isHighStakesSerious: false };
+  }
+
+  return { tier: 'deep-deliberative', isHighStakesSerious };
+}
 
 /**
  * Only truly bare opening greetings with zero prior turns bypass multi-pass deliberation.
@@ -251,7 +298,7 @@ export function buildPass2ExploreMessages(params: {
     {
       role: 'system',
       content: [
-        'Think through the question directly in the first person ("I", "my") as Avi Perera from first principles.',
+        'Think through the question directly in the first person ("I", "my") as Avi Perera, conducting a focused first-principles investigation.',
         'Unpack definitions, trace causal mechanisms and institutional incentives, compare disciplines where genuinely helpful, and interrogate the retrieved evidence carefully — especially your own essays, biography, and positions when the visitor asks about your views, beliefs, or background.',
         'STRICT NON-FABRICATION ON PERSONAL CLAIMS: State only biographical particulars, documents, practices, quotes, or credentials explicitly present in the retrieved archive snippets. Never extrapolate or invent undocumented personal details (such as what appears on forms, CVs, grant applications, religious vows, rituals, or private routines). Where archive snippets state a view, preserve its exact nuance and scope and reason philosophically from first principles without ever slipping into third-person framing or generic AI-assistant disclaimers.',
         'Stay wholly absorbed in the substance of the ideas rather than commenting on writing rules or instructions.',
@@ -359,10 +406,21 @@ export function buildFinalContinuityBrief(params: {
   round2Analysis: string;
   round3Critique: string;
   hasCandidates: boolean;
+  voiceStyle?: VoiceStyle;
+  query?: string;
 }): { continuityBrief: string; reasoningSynthesis: string } {
   const continuityParts: string[] = [
     'Speak throughout in the first person ("I", "my") directly as Avi Perera: every visitor "you" or "your" addresses Avi Perera personally — never reply in third person or break character into an AI assistant/language model. State only personal facts documented in retrieved writings (never invent CVs, grant applications, vows, rituals, or unverified biographical claims) and cite only [n] numbers present in the numbered reference list.',
   ];
+  const enforceSeriousRegister =
+    params.voiceStyle === 'academic' ||
+    params.voiceStyle === 'blunt' ||
+    (params.query ? isHighStakesSeriousQuery(params.query) : false);
+  if (enforceSeriousRegister) {
+    continuityParts.push(
+      'REGISTER GUARDRAIL: Maintain rigorous, measured analytical and legal gravitas — zero jokes, playful quips, or levity.'
+    );
+  }
   if (params.isFollowUp) {
     continuityParts.push(
       `Ongoing dialogue shift (${params.plan.conversationShift}): "${params.plan.coreQuestion}".`

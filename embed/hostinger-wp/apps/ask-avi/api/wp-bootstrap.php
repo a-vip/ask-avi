@@ -8,7 +8,7 @@ declare(strict_types=1);
 define('ASK_AVI_ADMIN_EMAIL', 'workwithavip@gmail.com');
 define('ASK_AVI_OPTION_KEY', 'ask_avi_settings');
 define('ASK_AVI_SECRET_OPTION', 'ask_avi_auth_secret');
-define('ASK_AVI_SCHEMA_VER', '1');
+define('ASK_AVI_SCHEMA_VER', '2');
 define('ASK_AVI_TOKEN_TTL', 30 * 24 * 60 * 60);
 
 /**
@@ -99,15 +99,16 @@ function ask_avi_default_master_prompt(): string {
     '- Keep any preparatory thinking wholly immersed in the substance of the problem — ideas, definitions, evidence, causal links, and counter-arguments.',
     '- Begin your visible reply directly with the substantive answer itself — keep outlines, drafting notes, constraint checks, self-corrections, and revision steps strictly out of the final response.',
     '- Reply candidly, incisively, and warmly in British English across any subject — world events, philosophy, law, software engineering, career decisions, mathematics, or life — using live web findings when current facts matter, never stitching canned passages from old essays.',
+    '- Register discipline: Light, dry British wit fits exploratory or personal banter in Standard/Candid registers, whereas in Legal & IR (academic) or Blunt registers — and on ANY query involving lethal autonomous weapons targeting, armed conflict, civilian harm, war crimes, director liability, or personal crisis — maintain unfailing analytical gravitas with zero jokes or levity.',
     '- Cite genuinely relied-upon numbered sources inline cleanly as [1], [2] without inventing details or stretching tangential matches. Only when asked directly about consulting, briefings, or contact, share https://calendly.com/aviperera/free-consultation or workwithavip@gmail.com briefly.',
   ]);
 }
 
 function ask_avi_voice_style_directive(string $style): string {
   $map = [
-    'standard' => 'Conversational, intellectually honest, and unpretentious — clear first-principles analysis without academic stiffness.',
-    'blunt' => 'Direct, unsentimental, and concise — cut straight to the underlying incentives, trade-offs, and what actually breaks in practice.',
-    'academic' => 'Rigorous analytical and international-law register referencing concrete treaties and mechanisms (Additional Protocol I Art. 36, Martens Clause, CCW GGE) where apt.',
+    'standard' => 'Conversational, intellectually honest, and unpretentious — clear first-principles analysis without academic stiffness; keep dry warmth where light topics invite it, and full analytical seriousness on grave legal or humanitarian issues.',
+    'blunt' => 'Direct, unsentimental, and concise — cut straight to the underlying incentives, trade-offs, and what actually breaks in practice. Zero small talk or jokey banter.',
+    'academic' => 'Rigorous analytical and international-law register referencing concrete treaties and mechanisms (Additional Protocol I Art. 36, Martens Clause, CCW GGE) where apt. Maintain strict scholarly gravitas with zero humour or casual banter.',
     'mentor' => 'Warm, reflective, and grounded — speak honestly like a thoughtful conversation over coffee, valuing lived evidence over performative polish.',
   ];
   $key = strtolower(trim($style));
@@ -195,10 +196,12 @@ function ask_avi_ensure_tables(): void {
 
   $users_table = $wpdb->prefix . 'ask_avi_users';
   $logs_table = $wpdb->prefix . 'ask_avi_logs';
+  $qa_table = $wpdb->prefix . 'ask_avi_qa_logs';
   $hasUsers = ($wpdb->get_var("SHOW TABLES LIKE '{$users_table}'") === $users_table);
   $hasLogs = ($wpdb->get_var("SHOW TABLES LIKE '{$logs_table}'") === $logs_table);
+  $hasQa = ($wpdb->get_var("SHOW TABLES LIKE '{$qa_table}'") === $qa_table);
 
-  if ($hasUsers && $hasLogs && function_exists('get_option') && get_option('ask_avi_schema_ver') === ASK_AVI_SCHEMA_VER) {
+  if ($hasUsers && $hasLogs && $hasQa && function_exists('get_option') && get_option('ask_avi_schema_ver') === ASK_AVI_SCHEMA_VER) {
     return;
   }
 
@@ -239,8 +242,34 @@ function ask_avi_ensure_tables(): void {
     KEY level_idx (level)
   ) {$charset_collate};";
 
+  $sql_qa = "CREATE TABLE {$qa_table} (
+    id varchar(64) NOT NULL,
+    ts bigint(20) NOT NULL,
+    thread_id varchar(64) NOT NULL DEFAULT '',
+    turn_index int(11) NOT NULL DEFAULT 1,
+    user_email varchar(190) NOT NULL DEFAULT 'guest',
+    user_name varchar(190) NOT NULL DEFAULT '',
+    engine_id varchar(40) NOT NULL DEFAULT '',
+    model_used varchar(128) NOT NULL DEFAULT '',
+    voice_style varchar(32) NOT NULL DEFAULT 'standard',
+    prompt_text longtext NOT NULL,
+    answer_text longtext NOT NULL,
+    thoughts_text longtext NULL,
+    cited_sources_json text NULL,
+    top_rag_score float NOT NULL DEFAULT 0,
+    rag_match_count int(11) NOT NULL DEFAULT 0,
+    is_content_gap tinyint(1) NOT NULL DEFAULT 0,
+    gap_topic varchar(255) NOT NULL DEFAULT '',
+    latency_ms int(11) NOT NULL DEFAULT 0,
+    PRIMARY KEY  (id),
+    KEY ts_idx (ts),
+    KEY gap_idx (is_content_gap),
+    KEY user_idx (user_email)
+  ) {$charset_collate};";
+
   dbDelta($sql_users);
   dbDelta($sql_logs);
+  dbDelta($sql_qa);
   if (function_exists('update_option')) {
     update_option('ask_avi_schema_ver', ASK_AVI_SCHEMA_VER, false);
   }
@@ -404,6 +433,287 @@ function ask_avi_record_chat_telemetry(?array $user, int $statusCode, ?string $m
       ? "Response streamed via " . ($modelUsed ?: 'upstream provider') . " in {$latencyMs}ms"
       : ($errorMessage ?: "Chat API returned HTTP {$statusCode}"),
   ]);
+}
+
+function ask_avi_upsert_qa_turn(array $entry): void {
+  global $wpdb;
+  if (!isset($wpdb)) {
+    return;
+  }
+  $promptText = ask_avi_clip_utf8(trim((string) ($entry['prompt_text'] ?? '')), 32000);
+  if ($promptText === '') {
+    return;
+  }
+
+  ask_avi_ensure_tables();
+  $qa_table = $wpdb->prefix . 'ask_avi_qa_logs';
+  $nowMs = (int) round(microtime(true) * 1000);
+
+  $rawId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string) ($entry['id'] ?? $entry['turn_id'] ?? ''));
+  $id = $rawId !== '' ? substr($rawId, 0, 64) : ('qa_' . bin2hex(random_bytes(8)));
+
+  $answerText = ask_avi_clip_utf8(trim((string) ($entry['answer_text'] ?? '')), 64000);
+  $thoughtsText = ask_avi_clip_utf8(trim((string) ($entry['thoughts_text'] ?? '')), 32000);
+  $citedJson = ask_avi_clip_utf8(trim((string) ($entry['cited_sources_json'] ?? '')), 16000);
+  $threadId = substr(preg_replace('/[^a-zA-Z0-9_-]/', '', (string) ($entry['thread_id'] ?? '')), 0, 64);
+  $turnIndex = max(1, (int) ($entry['turn_index'] ?? 1));
+  $userEmail = ask_avi_clip_utf8(strtolower(trim((string) ($entry['user_email'] ?? 'guest'))) ?: 'guest', 190);
+  $userName = ask_avi_clip_utf8(trim((string) ($entry['user_name'] ?? '')), 190);
+  $engineId = ask_avi_clip_utf8(trim((string) ($entry['engine_id'] ?? '')), 40);
+  $modelUsed = ask_avi_clip_utf8(trim((string) ($entry['model_used'] ?? '')), 128);
+  $voiceStyle = ask_avi_clip_utf8(trim((string) ($entry['voice_style'] ?? 'standard')) ?: 'standard', 32);
+  $topRagScore = (float) ($entry['top_rag_score'] ?? 0.0);
+  $ragMatchCount = max(0, (int) ($entry['rag_match_count'] ?? 0));
+  $latencyMs = max(0, (int) ($entry['latency_ms'] ?? 0));
+
+  $isTrivialGreeting = preg_match('/^(hi|hello|hey|thanks|thank you|good morning|good afternoon|good evening|test|ok|okay)\b/i', $promptText) === 1
+    && strlen($promptText) <= 36;
+  $explicitGap = array_key_exists('is_content_gap', $entry) ? !empty($entry['is_content_gap']) : null;
+  $autoGap = (!$isTrivialGreeting && strlen($promptText) >= 18 && ($topRagScore < 6.2 || $ragMatchCount === 0));
+  $isContentGap = ($explicitGap !== null) ? ($explicitGap ? 1 : 0) : ($autoGap ? 1 : 0);
+
+  $rawGapTopic = trim((string) ($entry['gap_topic'] ?? ''));
+  if ($rawGapTopic === '' && $isContentGap === 1) {
+    $rawGapTopic = preg_replace('/\s+/', ' ', $promptText) ?? $promptText;
+  }
+  $gapTopic = ask_avi_clip_utf8($rawGapTopic, 180);
+
+  $existing = $wpdb->get_row(
+    $wpdb->prepare("SELECT id, answer_text, thoughts_text, cited_sources_json FROM {$qa_table} WHERE id = %s", $id),
+    ARRAY_A
+  );
+
+  if ($existing) {
+    $updates = [];
+    if ($answerText !== '') $updates['answer_text'] = $answerText;
+    if ($thoughtsText !== '') $updates['thoughts_text'] = $thoughtsText;
+    if ($citedJson !== '') $updates['cited_sources_json'] = $citedJson;
+    if ($modelUsed !== '') $updates['model_used'] = $modelUsed;
+    if ($voiceStyle !== '') $updates['voice_style'] = $voiceStyle;
+    if ($topRagScore > 0) $updates['top_rag_score'] = $topRagScore;
+    if ($ragMatchCount > 0 || $topRagScore > 0) $updates['rag_match_count'] = $ragMatchCount;
+    if ($latencyMs > 0) $updates['latency_ms'] = $latencyMs;
+    if ($userName !== '') $updates['user_name'] = $userName;
+    if ($threadId !== '') $updates['thread_id'] = $threadId;
+    $updates['is_content_gap'] = $isContentGap;
+    if ($gapTopic !== '') $updates['gap_topic'] = $gapTopic;
+    if (!empty($updates)) {
+      $wpdb->update($qa_table, $updates, ['id' => $id]);
+    }
+    return;
+  }
+
+  $wpdb->insert($qa_table, [
+    'id' => $id,
+    'ts' => $nowMs,
+    'thread_id' => $threadId,
+    'turn_index' => $turnIndex,
+    'user_email' => $userEmail,
+    'user_name' => $userName,
+    'engine_id' => $engineId,
+    'model_used' => $modelUsed,
+    'voice_style' => $voiceStyle,
+    'prompt_text' => $promptText,
+    'answer_text' => $answerText,
+    'thoughts_text' => $thoughtsText !== '' ? $thoughtsText : null,
+    'cited_sources_json' => $citedJson !== '' ? $citedJson : null,
+    'top_rag_score' => $topRagScore,
+    'rag_match_count' => $ragMatchCount,
+    'is_content_gap' => $isContentGap,
+    'gap_topic' => $gapTopic,
+    'latency_ms' => $latencyMs,
+  ]);
+}
+
+function ask_avi_map_wp_category(array $catNames): string {
+  $joined = strtolower(implode(' ', $catNames));
+  if (preg_match('/\b(laws|ihl|killer robots?|autonomous weapons?|military|humanitarian law)\b/', $joined)) {
+    return 'LAWS & IHL';
+  }
+  if (preg_match('/\b(governance|regulation|policy|ai|ethics)\b/', $joined)) {
+    return 'AI Governance';
+  }
+  if (preg_match('/\b(project|code|sovdash|system|software|tool)\b/', $joined)) {
+    return 'Systems & Projects';
+  }
+  if (preg_match('/\b(research|paper|doi|publication|academic)\b/', $joined)) {
+    return 'Research & Publications';
+  }
+  return 'Essays & Philosophy';
+}
+
+function ask_avi_chunk_wp_post_html(string $title, string $rawHtml): array {
+  $html = preg_replace('#<(script|style|noscript|nav|aside)[^>]*>.*?</\1>#is', ' ', $rawHtml) ?? $rawHtml;
+  if (function_exists('strip_shortcodes')) {
+    $html = strip_shortcodes($html);
+  }
+  // Split roughly along H2/H3 section boundaries while retaining heading context
+  $parts = preg_split('#(?=<h[23]\b)#i', $html) ?: [$html];
+  $chunks = [];
+
+  foreach ($parts as $section) {
+    $heading = '';
+    if (preg_match('#<h[23][^>]*>(.*?)</h[23]>#is', $section, $m)) {
+      $heading = trim(html_entity_decode(strip_tags($m[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+      $sectionBody = substr($section, strlen($m[0]));
+    } else {
+      $sectionBody = $section;
+    }
+
+    $plain = preg_replace('#</(p|div|li|blockquote|h[1-6])>#i', "\n", $sectionBody) ?? $sectionBody;
+    $plain = html_entity_decode(strip_tags($plain), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $plain = preg_replace('/[ \t]+/', ' ', $plain) ?? $plain;
+    $plain = trim((string) preg_replace("/\n{2,}/", "\n", $plain));
+    if ($plain === '') {
+      continue;
+    }
+
+    $paragraphs = explode("\n", $plain);
+    $buf = $heading !== '' ? "{$heading}: " : '';
+    foreach ($paragraphs as $p) {
+      $p = trim($p);
+      if ($p === '') continue;
+      if (strlen($buf) + strlen($p) + 1 > 650 && strlen($buf) >= 220) {
+        $chunks[] = trim($buf);
+        $buf = $heading !== '' ? "{$heading}: {$p}" : $p;
+      } else {
+        $buf = $buf === '' ? $p : (substr($buf, -2) === ': ' ? $buf . $p : $buf . ' ' . $p);
+      }
+      if (count($chunks) >= 16) {
+        break 2;
+      }
+    }
+    if (strlen(trim($buf)) >= 40) {
+      $chunks[] = trim($buf);
+    }
+    if (count($chunks) >= 16) {
+      break;
+    }
+  }
+
+  if (empty($chunks)) {
+    $fallbackPlain = trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8')) ?? '');
+    if ($fallbackPlain !== '') {
+      $chunks[] = ask_avi_clip_utf8($title . ': ' . $fallbackPlain, 680);
+    }
+  }
+
+  return array_slice($chunks, 0, 16);
+}
+
+function ask_avi_get_live_wp_knowledge(bool $forceRebuild = false): array {
+  $cacheKey = 'ask_avi_live_wp_corpus_v1';
+  $nowMs = (int) round(microtime(true) * 1000);
+  $lastPostChangeMs = function_exists('get_option') ? (int) get_option('ask_avi_last_post_change_ms', 0) : 0;
+
+  if (!$forceRebuild && function_exists('get_option')) {
+    $cached = get_option($cacheKey, null);
+    if (is_array($cached) && !empty($cached['generatedAtMs'])) {
+      $ageMs = $nowMs - (int) $cached['generatedAtMs'];
+      if ($ageMs < 15 * 60 * 1000 && (int) $cached['generatedAtMs'] >= $lastPostChangeMs) {
+        return $cached;
+      }
+    }
+  }
+
+  if (!function_exists('get_posts')) {
+    return [
+      'ok' => true,
+      'generatedAt' => gmdate('c'),
+      'generatedAtMs' => $nowMs,
+      'totalEntries' => 0,
+      'entries' => [],
+    ];
+  }
+
+  $posts = get_posts([
+    'post_type' => 'post',
+    'post_status' => 'publish',
+    'numberposts' => 200,
+    'orderby' => 'date',
+    'order' => 'DESC',
+  ]);
+
+  $entries = [];
+  $thirtyDaysAgo = time() - (30 * 24 * 60 * 60);
+
+  foreach ($posts as $idx => $post) {
+    $postId = (int) $post->ID;
+    $title = trim(html_entity_decode(strip_tags((string) $post->post_title), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+    if ($title === '') continue;
+
+    $rawContent = (string) $post->post_content;
+    $chunks = ask_avi_chunk_wp_post_html($title, $rawContent);
+    if (empty($chunks)) continue;
+
+    $rawExcerpt = trim((string) ($post->post_excerpt ?? ''));
+    $summarySource = $rawExcerpt !== ''
+      ? html_entity_decode(strip_tags($rawExcerpt), ENT_QUOTES | ENT_HTML5, 'UTF-8')
+      : ($chunks[0] ?? $title);
+    $summary = ask_avi_clip_utf8(trim((string) preg_replace('/\s+/', ' ', $summarySource)), 320);
+
+    $catNames = [];
+    if (function_exists('wp_get_post_categories') && function_exists('get_category')) {
+      $catIds = wp_get_post_categories($postId);
+      if (is_array($catIds)) {
+        foreach ($catIds as $cid) {
+          $c = get_category($cid);
+          if ($c && !is_wp_error($c) && !empty($c->name)) {
+            $catNames[] = (string) $c->name;
+          }
+        }
+      }
+    }
+
+    $kwSet = [];
+    if (function_exists('wp_get_post_tags')) {
+      $tags = wp_get_post_tags($postId);
+      if (is_array($tags)) {
+        foreach ($tags as $t) {
+          if (!empty($t->name)) $kwSet[strtolower((string) $t->name)] = true;
+        }
+      }
+    }
+    foreach ($catNames as $cn) {
+      $kwSet[strtolower($cn)] = true;
+    }
+    foreach (preg_split('/[^a-z0-9]+/i', strtolower($title)) ?: [] as $tok) {
+      if (strlen($tok) >= 3) $kwSet[$tok] = true;
+    }
+
+    $postTs = strtotime((string) $post->post_date_gmt ?: (string) $post->post_date) ?: time();
+    $dateStr = gmdate('Y-m-d', $postTs);
+    $justPublished = ($idx < 6 || $postTs >= $thirtyDaysAgo);
+    $url = function_exists('get_permalink') ? (string) get_permalink($postId) : '';
+    $doi = function_exists('get_post_meta') ? trim((string) get_post_meta($postId, 'doi', true)) : '';
+
+    $entries[] = [
+      'id' => 'wp-post-' . $postId,
+      'title' => $title,
+      'category' => ask_avi_map_wp_category($catNames),
+      'date' => $dateStr,
+      'url' => $url,
+      'doi' => $doi,
+      'keywords' => array_slice(array_keys($kwSet), 0, 24),
+      'summary' => $summary,
+      'chunks' => $chunks,
+      'justPublished' => $justPublished,
+      'liveIngested' => true,
+      'contentHash' => substr(hash('sha256', $title . "\n" . $rawContent), 0, 20),
+    ];
+  }
+
+  $payload = [
+    'ok' => true,
+    'generatedAt' => gmdate('c'),
+    'generatedAtMs' => $nowMs,
+    'totalEntries' => count($entries),
+    'entries' => $entries,
+  ];
+  if (function_exists('update_option')) {
+    update_option($cacheKey, $payload, false);
+  }
+  return $payload;
 }
 
 function ask_avi_send_json(int $status, array $payload): void {

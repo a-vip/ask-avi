@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
  * provision database tables, and purge LiteSpeed caches on new theme version rollout.
  */
 add_action('init', static function () {
-  if (get_option('ask_avi_deployment_ver') === '20261118a') {
+  if (get_option('ask_avi_deployment_ver') === '20261119a') {
     return;
   }
 
@@ -45,7 +45,7 @@ add_action('init', static function () {
     }
   }
 
-  update_option('ask_avi_deployment_ver', '20261118a', false);
+  update_option('ask_avi_deployment_ver', '20261119a', false);
   flush_rewrite_rules(false);
   do_action('litespeed_purge_all');
   if (class_exists('\LiteSpeed\Purge')) {
@@ -140,6 +140,108 @@ add_action('admin_post_ask_avi_export_csv', static function () {
   exit;
 });
 
+add_action('save_post_post', static function ($post_id) {
+  if (wp_is_post_revision($post_id) || wp_is_post_autosave($post_id)) {
+    return;
+  }
+  update_option('ask_avi_last_post_change_ms', (int) round(microtime(true) * 1000), false);
+  $bootstrap = get_template_directory() . '/apps/ask-avi/api/wp-bootstrap.php';
+  if (file_exists($bootstrap)) {
+    require_once $bootstrap;
+    if (function_exists('ask_avi_get_live_wp_knowledge')) {
+      ask_avi_get_live_wp_knowledge(true);
+    }
+  }
+}, 20);
+
+add_action('deleted_post', static function () {
+  update_option('ask_avi_last_post_change_ms', (int) round(microtime(true) * 1000), false);
+});
+
+add_action('trashed_post', static function () {
+  update_option('ask_avi_last_post_change_ms', (int) round(microtime(true) * 1000), false);
+});
+
+add_action('admin_post_ask_avi_export_qa_csv', static function () {
+  if (!current_user_can('manage_options')) {
+    wp_die('Unauthorized');
+  }
+  check_admin_referer('ask_avi_export_qa_csv');
+
+  global $wpdb;
+  $qa_table = $wpdb->prefix . 'ask_avi_qa_logs';
+  $rows = $wpdb->get_results("SELECT * FROM {$qa_table} ORDER BY ts DESC", ARRAY_A) ?: [];
+
+  header('Content-Type: text/csv; charset=utf-8');
+  header('Content-Disposition: attachment; filename="ask-avi-qa-archive-' . gmdate('Y-m-d') . '.csv"');
+  $out = fopen('php://output', 'w');
+  fputcsv($out, [
+    'Time (UTC)',
+    'User Name',
+    'User Email',
+    'Thread ID',
+    'Turn #',
+    'Voice Style',
+    'Engine',
+    'Model',
+    'Latency (ms)',
+    'Top RAG Score',
+    'RAG Matches',
+    'Content Gap',
+    'Gap Topic',
+    'User Question / Prompt',
+    'Avi Response',
+    'Internal Reasoning / Thoughts',
+    'Cited Sources JSON',
+  ]);
+
+  foreach ($rows as $q) {
+    $safe = static function ($val) {
+      $s = (string) $val;
+      return preg_match('/^[=+\-@\t\r]/', $s) ? "'" . $s : $s;
+    };
+    fputcsv($out, [
+      gmdate('c', (int) floor(((int) $q['ts']) / 1000)),
+      $safe($q['user_name']),
+      $safe($q['user_email']),
+      $safe($q['thread_id']),
+      (int) $q['turn_index'],
+      $safe($q['voice_style']),
+      $safe($q['engine_id']),
+      $safe($q['model_used']),
+      (int) $q['latency_ms'],
+      (float) $q['top_rag_score'],
+      (int) $q['rag_match_count'],
+      !empty($q['is_content_gap']) ? 'Yes' : 'No',
+      $safe($q['gap_topic']),
+      $safe($q['prompt_text']),
+      $safe($q['answer_text']),
+      $safe($q['thoughts_text'] ?? ''),
+      $safe($q['cited_sources_json'] ?? ''),
+    ]);
+  }
+  fclose($out);
+  exit;
+});
+
+add_action('admin_post_ask_avi_delete_qa', static function () {
+  if (!current_user_can('manage_options')) {
+    wp_die('Unauthorized');
+  }
+  $qa_id = sanitize_text_field(wp_unslash($_POST['qa_id'] ?? ''));
+  if ($qa_id === '') {
+    wp_safe_redirect(admin_url('admin.php?page=ask-avi-admin&qa_deleted=0'));
+    exit;
+  }
+  check_admin_referer('ask_avi_delete_qa_' . $qa_id);
+
+  global $wpdb;
+  $qa_table = $wpdb->prefix . 'ask_avi_qa_logs';
+  $deleted = $wpdb->delete($qa_table, ['id' => $qa_id], ['%s']);
+  wp_safe_redirect(admin_url('admin.php?page=ask-avi-admin&qa_deleted=' . ($deleted ? '1' : '0')));
+  exit;
+});
+
 add_action('admin_post_ask_avi_delete_user', static function () {
   if (!current_user_can('manage_options')) {
     wp_die('Unauthorized');
@@ -172,13 +274,23 @@ function ask_avi_render_admin_page(): void {
   global $wpdb;
   $users_table = $wpdb->prefix . 'ask_avi_users';
   $logs_table = $wpdb->prefix . 'ask_avi_logs';
+  $qa_table = $wpdb->prefix . 'ask_avi_qa_logs';
   $users_exists = ($wpdb->get_var("SHOW TABLES LIKE '{$users_table}'") === $users_table);
+  $qa_exists = ($wpdb->get_var("SHOW TABLES LIKE '{$qa_table}'") === $qa_table);
 
   $saved = false;
   $masterReset = false;
+  $knowledgeSynced = false;
   $adminPwSaved = false;
   $adminPwError = '';
-  if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ask_avi_reset_master_prompt'])) {
+  if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ask_avi_sync_wp_knowledge'])) {
+    check_admin_referer('ask_avi_sync_wp_knowledge');
+    update_option('ask_avi_last_post_change_ms', (int) round(microtime(true) * 1000), false);
+    if (function_exists('ask_avi_get_live_wp_knowledge')) {
+      ask_avi_get_live_wp_knowledge(true);
+    }
+    $knowledgeSynced = true;
+  } elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ask_avi_reset_master_prompt'])) {
     check_admin_referer('ask_avi_save_settings');
     $existing = function_exists('ask_avi_get_settings') ? ask_avi_get_settings() : (get_option('ask_avi_settings', []) ?: []);
     if (!is_array($existing)) $existing = [];
@@ -285,6 +397,19 @@ function ask_avi_render_admin_page(): void {
   $dayAgoMs = (int) round(microtime(true) * 1000) - (24 * 60 * 60 * 1000);
   $chats24h = $users_exists ? (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$logs_table} WHERE ts >= %d AND type IN ('chat_ok','chat_error')", $dayAgoMs)) : 0;
   $errTotal = $users_exists ? (int) $wpdb->get_var("SELECT COUNT(*) FROM {$logs_table} WHERE level = 'error'") : 0;
+
+  $qaRows = $qa_exists
+    ? ($wpdb->get_results("SELECT * FROM {$qa_table} ORDER BY ts DESC LIMIT 500", ARRAY_A) ?: [])
+    : [];
+  $totalQaCount = $qa_exists ? (int) $wpdb->get_var("SELECT COUNT(*) FROM {$qa_table}") : 0;
+  $contentGapTotal = $qa_exists ? (int) $wpdb->get_var("SELECT COUNT(*) FROM {$qa_table} WHERE is_content_gap = 1") : 0;
+  $contentGaps = $qa_exists
+    ? ($wpdb->get_results("SELECT * FROM {$qa_table} WHERE is_content_gap = 1 ORDER BY ts DESC LIMIT 100", ARRAY_A) ?: [])
+    : [];
+  $liveCorpus = function_exists('ask_avi_get_live_wp_knowledge')
+    ? ask_avi_get_live_wp_knowledge(false)
+    : ['totalEntries' => 0, 'generatedAt' => ''];
+  $liveCount = (int) ($liveCorpus['totalEntries'] ?? 0);
   ?>
   <div class="wrap">
     <h1>Ask Avi — AI Persona Administration</h1>
@@ -294,7 +419,7 @@ function ask_avi_render_admin_page(): void {
       <a href="<?php echo esc_url(home_url('/ask-avi/')); ?>" target="_blank" class="button button-secondary" style="margin-left:8px;">Open Live Ask Avi (/ask-avi/) &nearr;</a>
     </p>
 
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:16px 0 20px;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:16px 0 20px;">
       <div style="background:#fff;border:1px solid #ccd0d4;border-radius:6px;padding:12px 14px;">
         <div style="font-size:11px;text-transform:uppercase;color:#646970;">Registered Accounts</div>
         <div style="font-size:22px;font-weight:700;margin-top:4px;"><?php echo (int) $totalUsers; ?></div>
@@ -306,9 +431,22 @@ function ask_avi_render_admin_page(): void {
         <div style="font-size:12px;color:#646970;">Synced to WP Leads</div>
       </div>
       <div style="background:#fff;border:1px solid #ccd0d4;border-radius:6px;padding:12px 14px;">
-        <div style="font-size:11px;text-transform:uppercase;color:#646970;">Chats (Last 24h)</div>
-        <div style="font-size:22px;font-weight:700;margin-top:4px;"><?php echo (int) $chats24h; ?></div>
-        <div style="font-size:12px;color:#646970;">Live &amp; authenticated turns</div>
+        <div style="font-size:11px;text-transform:uppercase;color:#646970;">Recorded Q&amp;A Turns</div>
+        <div style="font-size:22px;font-weight:700;margin-top:4px;"><?php echo (int) $totalQaCount; ?></div>
+        <div style="font-size:12px;color:#646970;">Chats 24h: <?php echo (int) $chats24h; ?></div>
+      </div>
+      <div style="background:#fff;border:1px solid #ccd0d4;border-radius:6px;padding:12px 14px;">
+        <div style="font-size:11px;text-transform:uppercase;color:#646970;">Content Gaps (&ldquo;Next Essay&rdquo;)</div>
+        <div style="font-size:22px;font-weight:700;margin-top:4px;color:<?php echo $contentGapTotal > 0 ? '#996800' : '#008a20'; ?>;"><?php echo (int) $contentGapTotal; ?></div>
+        <div style="font-size:12px;color:#646970;">Weak internal RAG match</div>
+      </div>
+      <div style="background:#fff;border:1px solid #ccd0d4;border-radius:6px;padding:12px 14px;">
+        <div style="font-size:11px;text-transform:uppercase;color:#646970;">Live WP Posts Indexed</div>
+        <div style="font-size:22px;font-weight:700;margin-top:4px;"><?php echo $liveCount; ?></div>
+        <form method="post" style="margin:4px 0 0;">
+          <?php wp_nonce_field('ask_avi_sync_wp_knowledge'); ?>
+          <button type="submit" name="ask_avi_sync_wp_knowledge" value="1" class="button button-small">Sync WP Posts Now</button>
+        </form>
       </div>
       <div style="background:#fff;border:1px solid #ccd0d4;border-radius:6px;padding:12px 14px;">
         <div style="font-size:11px;text-transform:uppercase;color:#646970;">Logged Errors</div>
@@ -319,6 +457,8 @@ function ask_avi_render_admin_page(): void {
 
     <?php if ($adminPwError !== ''): ?>
       <div class="notice notice-error is-dismissible"><p><?php echo esc_html($adminPwError); ?></p></div>
+    <?php elseif ($knowledgeSynced): ?>
+      <div class="notice notice-success is-dismissible"><p>Live WordPress blog corpus re-indexed for Ask Avi RAG (<?php echo $liveCount; ?> published posts ready).</p></div>
     <?php elseif ($masterReset): ?>
       <div class="notice notice-success is-dismissible"><p>Master Prompt &amp; Reasoning Policy reset to built-in default.</p></div>
     <?php elseif ($adminPwSaved): ?>
@@ -327,6 +467,8 @@ function ask_avi_render_admin_page(): void {
       <div class="notice notice-success is-dismissible"><p>Ask Avi backend settings saved securely in WordPress options.</p></div>
     <?php elseif (isset($_GET['deleted']) && $_GET['deleted'] === '1'): ?>
       <div class="notice notice-success is-dismissible"><p>User record removed from Ask Avi directory.</p></div>
+    <?php elseif (isset($_GET['qa_deleted']) && $_GET['qa_deleted'] === '1'): ?>
+      <div class="notice notice-success is-dismissible"><p>Q&amp;A transcript row removed.</p></div>
     <?php endif; ?>
 
     <form method="post" style="background:#fff;padding:18px;border:1px solid #ccd0d4;border-radius:6px;margin-bottom:24px;">
@@ -441,6 +583,157 @@ function ask_avi_render_admin_page(): void {
                 <input type="hidden" name="user_id" value="<?php echo esc_attr($u['id']); ?>" />
                 <?php wp_nonce_field('ask_avi_delete_user_' . $u['id']); ?>
                 <button type="submit" class="button button-small button-link-delete">Remove</button>
+              </form>
+            </td>
+          </tr>
+        <?php endforeach; endif; ?>
+      </tbody>
+    </table>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin:24px 0 10px;">
+      <div>
+        <h2 style="margin:0;">Unanswered Questions &rarr; Next Essay (Content-Gap Radar · <?php echo (int) $contentGapTotal; ?>)</h2>
+        <p class="description" style="margin:2px 0 0;">Visitor questions with weak archive match score (&lt; 6.2 or zero essay hits) — ideal topics for your next article or knowledge dossier.</p>
+      </div>
+    </div>
+
+    <table class="widefat striped" style="margin-bottom:28px;">
+      <thead>
+        <tr>
+          <th style="width:130px;">Time (UTC)</th>
+          <th style="width:150px;">Visitor</th>
+          <th style="width:90px;">RAG Score</th>
+          <th>Question / Gap Topic</th>
+          <th style="width:180px;">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php if (empty($contentGaps)): ?>
+          <tr><td colspan="5">No weak-coverage questions logged yet.</td></tr>
+        <?php else: foreach ($contentGaps as $g): ?>
+          <tr>
+            <td><?php echo esc_html(gmdate('Y-m-d H:i', (int) floor(((int) $g['ts']) / 1000))); ?></td>
+            <td><?php echo esc_html(($g['user_name'] !== '' ? $g['user_name'] . ' · ' : '') . $g['user_email']); ?></td>
+            <td><code><?php echo esc_html(number_format((float) $g['top_rag_score'], 2)); ?></code> (<?php echo (int) $g['rag_match_count']; ?>)</td>
+            <td>
+              <strong><?php echo esc_html($g['gap_topic'] ?: wp_trim_words((string) $g['prompt_text'], 16, '…')); ?></strong>
+              <details style="margin-top:4px;">
+                <summary style="cursor:pointer;color:#2271b1;font-size:12px;">Inspect prompt &amp; given answer</summary>
+                <div style="margin-top:6px;padding:8px 10px;background:#f6f7f7;border-radius:4px;white-space:pre-wrap;font-size:12.5px;"><strong>Prompt:</strong> <?php echo esc_html($g['prompt_text']); ?>
+
+<strong>Answer:</strong> <?php echo esc_html($g['answer_text'] ?: '—'); ?></div>
+              </details>
+            </td>
+            <td>
+              <a
+                href="<?php echo esc_url(admin_url('post-new.php?post_title=' . rawurlencode($g['gap_topic'] ?: wp_trim_words((string) $g['prompt_text'], 12, '')))); ?>"
+                class="button button-small button-primary"
+                target="_blank"
+              >Draft Essay &nearr;</a>
+            </td>
+          </tr>
+        <?php endforeach; endif; ?>
+      </tbody>
+    </table>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin:24px 0 10px;">
+      <div>
+        <h2 style="margin:0;">Complete Questions &amp; Answers Collection (<?php echo (int) $totalQaCount; ?> Total · Showing Latest <?php echo count($qaRows); ?>)</h2>
+        <p class="description" style="margin:2px 0 0;">Every visitor question/prompt submitted to Ask Avi alongside Avi&apos;s full response, model/register used, citations, and reasoning trace.</p>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <input
+          type="search"
+          id="ask-avi-qa-filter"
+          placeholder="Search questions, answers, users, or models…"
+          style="min-width:250px;"
+          oninput="askAviFilterQaTable()"
+        />
+        <select id="ask-avi-qa-gap-select" onchange="askAviFilterQaTable()">
+          <option value="all">All Q&amp;A Turns</option>
+          <option value="gap">Content Gaps Only</option>
+        </select>
+        <?php if (!empty($qaRows)): ?>
+          <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin:0;">
+            <input type="hidden" name="action" value="ask_avi_export_qa_csv" />
+            <?php wp_nonce_field('ask_avi_export_qa_csv'); ?>
+            <button type="submit" class="button">Export Full Q&amp;A CSV</button>
+          </form>
+        <?php endif; ?>
+      </div>
+    </div>
+
+    <script>
+    function askAviFilterQaTable() {
+      var q = (document.getElementById('ask-avi-qa-filter').value || '').toLowerCase();
+      var mode = document.getElementById('ask-avi-qa-gap-select').value;
+      document.querySelectorAll('#ask-avi-qa-tbody tr[data-qa-search]').forEach(function(r) {
+        var textOk = r.getAttribute('data-qa-search').indexOf(q) !== -1;
+        var gapOk = (mode !== 'gap') || r.getAttribute('data-is-gap') === '1';
+        r.style.display = (textOk && gapOk) ? '' : 'none';
+      });
+    }
+    </script>
+
+    <table class="widefat striped" style="margin-bottom:28px;">
+      <thead>
+        <tr>
+          <th style="width:125px;">Time (UTC)</th>
+          <th style="width:165px;">Visitor &amp; Mode</th>
+          <th style="width:32%;">Question / Prompt</th>
+          <th>Answer, Citations &amp; Reasoning</th>
+          <th style="width:80px;">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="ask-avi-qa-tbody">
+        <?php if (empty($qaRows)): ?>
+          <tr><td colspan="5">No visitor Q&amp;A conversations recorded yet.</td></tr>
+        <?php else: foreach ($qaRows as $q):
+          $qSearch = strtolower($q['prompt_text'] . ' ' . $q['answer_text'] . ' ' . $q['user_email'] . ' ' . $q['user_name'] . ' ' . $q['model_used'] . ' ' . $q['voice_style']);
+          $citedArr = $q['cited_sources_json'] ? json_decode((string) $q['cited_sources_json'], true) : [];
+        ?>
+          <tr data-qa-search="<?php echo esc_attr($qSearch); ?>" data-is-gap="<?php echo !empty($q['is_content_gap']) ? '1' : '0'; ?>">
+            <td>
+              <?php echo esc_html(gmdate('Y-m-d H:i', (int) floor(((int) $q['ts']) / 1000))); ?><br />
+              <span style="color:#646970;font-size:11px;">Turn <?php echo (int) $q['turn_index']; ?> · <?php echo (int) $q['latency_ms']; ?>ms</span>
+            </td>
+            <td>
+              <strong><?php echo esc_html($q['user_name'] !== '' ? $q['user_name'] : 'Guest'); ?></strong><br />
+              <span style="font-size:11px;color:#646970;"><?php echo esc_html($q['user_email']); ?></span><br />
+              <code><?php echo esc_html($q['voice_style']); ?></code> · <span style="font-size:11px;"><?php echo esc_html($q['model_used'] ?: $q['engine_id']); ?></span><br />
+              <span style="font-size:11px;color:#646970;">RAG <?php echo esc_html(number_format((float) $q['top_rag_score'], 1)); ?> (<?php echo (int) $q['rag_match_count']; ?> hits)</span>
+              <?php if (!empty($q['is_content_gap'])): ?>
+                <span style="display:inline-block;margin-top:3px;padding:1px 6px;border-radius:3px;background:#fcf0f1;color:#996800;font-size:10.5px;font-weight:600;">Content Gap</span>
+              <?php endif; ?>
+            </td>
+            <td style="white-space:pre-wrap;font-size:13px;vertical-align:top;"><?php echo esc_html($q['prompt_text']); ?></td>
+            <td style="vertical-align:top;">
+              <div style="font-size:13px;white-space:pre-wrap;"><?php echo esc_html(wp_trim_words((string) $q['answer_text'], 45, '…')); ?></div>
+              <details style="margin-top:6px;">
+                <summary style="cursor:pointer;color:#2271b1;font-size:12px;">Read full answer, citations &amp; reasoning</summary>
+                <div style="margin-top:8px;padding:10px 12px;background:#f6f7f7;border:1px solid #dcdcde;border-radius:4px;white-space:pre-wrap;font-size:12.5px;max-height:420px;overflow:auto;"><strong>Full Response:</strong>
+<?php echo esc_html($q['answer_text'] ?: '—'); ?>
+<?php if (!empty($q['thoughts_text'])): ?>
+
+<hr style="margin:10px 0;" /><strong>Internal Reasoning:</strong>
+<?php echo esc_html($q['thoughts_text']); ?>
+<?php endif; ?>
+<?php if (is_array($citedArr) && !empty($citedArr)): ?>
+
+<hr style="margin:10px 0;" /><strong>Cited Sources:</strong>
+<?php foreach ($citedArr as $cs): ?>
+[<?php echo (int) ($cs['index'] ?? 0); ?>] <?php echo esc_html((string) ($cs['title'] ?? '')); ?> — <?php echo esc_html((string) ($cs['url'] ?? '')); ?>
+
+<?php endforeach; ?>
+<?php endif; ?></div>
+              </details>
+            </td>
+            <td>
+              <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" onsubmit="return confirm('Delete this Q&amp;A transcript row?');">
+                <input type="hidden" name="action" value="ask_avi_delete_qa" />
+                <input type="hidden" name="qa_id" value="<?php echo esc_attr($q['id']); ?>" />
+                <?php wp_nonce_field('ask_avi_delete_qa_' . $q['id']); ?>
+                <button type="submit" class="button button-small button-link-delete">Delete</button>
               </form>
             </td>
           </tr>

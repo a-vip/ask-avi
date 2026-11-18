@@ -688,7 +688,10 @@ export function Composer({
       </div>
 
       {!centered && (
-        <p className="composer-disclaimer">
+        <p
+          className="composer-disclaimer"
+          title="AI proxy grounded in Avi Perera's published writings, research dossiers, and verifiable inline citations."
+        >
           Ask Avi is AI and can make mistakes. Please double-check responses.
         </p>
       )}

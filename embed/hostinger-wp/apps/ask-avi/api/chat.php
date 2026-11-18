@@ -41,6 +41,48 @@ $temperature = isset($body['temperature']) ? (float) $body['temperature'] : 0.72
 $temperature = max(0.0, min(1.3, $temperature));
 $isAuthenticated = ($reqUser !== null);
 
+$cleanMeta = static function ($val): string {
+  $s = trim((string) $val);
+  return function_exists('sanitize_text_field') ? sanitize_text_field($s) : $s;
+};
+$turnId = $cleanMeta($body['turnId'] ?? '');
+$threadId = $cleanMeta($body['threadId'] ?? '');
+$turnIndex = isset($body['turnIndex']) && is_numeric($body['turnIndex']) ? max(1, (int) $body['turnIndex']) : 1;
+$voiceStyle = $cleanMeta($body['voiceStyle'] ?? 'standard') ?: 'standard';
+$engineId = $cleanMeta($body['engineId'] ?? $mode) ?: $mode;
+$topRagScore = isset($body['topRagScore']) && is_numeric($body['topRagScore']) ? (float) $body['topRagScore'] : 0.0;
+$ragMatchCount = isset($body['ragMatchCount']) && is_numeric($body['ragMatchCount']) ? max(0, (int) $body['ragMatchCount']) : 0;
+
+$latestUserPrompt = '';
+for ($idx = count($body['contents']) - 1; $idx >= 0; $idx--) {
+  $turn = $body['contents'][$idx];
+  if (($turn['role'] ?? 'user') === 'user' && is_array($turn['parts'] ?? null)) {
+    $texts = [];
+    foreach ($turn['parts'] as $p) {
+      if (isset($p['text']) && is_string($p['text'])) {
+        $texts[] = $p['text'];
+      }
+    }
+    $candidate = trim(implode("\n", $texts));
+    if ($candidate !== '') {
+      $latestUserPrompt = $candidate;
+      break;
+    }
+  }
+}
+
+$qaContext = [
+  'phase' => $phase,
+  'turnId' => $turnId,
+  'threadId' => $threadId,
+  'turnIndex' => $turnIndex,
+  'voiceStyle' => $voiceStyle,
+  'engineId' => $engineId,
+  'topRagScore' => $topRagScore,
+  'ragMatchCount' => $ragMatchCount,
+  'promptText' => $latestUserPrompt,
+];
+
 // Master Prompt & Reasoning Policy live strictly on the backend (WP Admin configurable).
 // Untrusted client payloads never override the Master Prompt directly.
 $systemInstruction = ask_avi_assemble_system_prompt(
@@ -88,6 +130,60 @@ function ask_avi_to_openai_messages(array $contents, string $system, bool $isAut
 }
 
 /**
+ * Parse final assistant answer & reasoning from buffered upstream SSE events for server-side QA archival.
+ */
+function ask_avi_extract_answer_from_sse(string $sseBuffer, string $protocol): array {
+  $answer = '';
+  $thoughts = '';
+  $lines = preg_split('/\r?\n/', $sseBuffer) ?: [];
+  foreach ($lines as $line) {
+    $trimmed = trim($line);
+    if (stripos($trimmed, 'data:') !== 0) {
+      continue;
+    }
+    $data = trim(substr($trimmed, 5));
+    if ($data === '' || $data === '[DONE]') {
+      continue;
+    }
+    $parsed = json_decode($data, true);
+    if (!is_array($parsed)) {
+      continue;
+    }
+    if ($protocol === 'gemini') {
+      $parts = $parsed['candidates'][0]['content']['parts'] ?? [];
+      if (is_array($parts)) {
+        foreach ($parts as $p) {
+          if (!is_array($p) || !isset($p['text']) || !is_string($p['text'])) continue;
+          if (!empty($p['thought'])) {
+            $thoughts .= $p['text'];
+          } else {
+            $answer .= $p['text'];
+          }
+        }
+      }
+    } else {
+      $delta = $parsed['choices'][0]['delta'] ?? null;
+      if (is_array($delta)) {
+        if (isset($delta['reasoning']) && is_string($delta['reasoning'])) {
+          $thoughts .= $delta['reasoning'];
+        } elseif (isset($delta['reasoning_content']) && is_string($delta['reasoning_content'])) {
+          $thoughts .= $delta['reasoning_content'];
+        }
+        if (isset($delta['content']) && is_string($delta['content'])) {
+          $answer .= $delta['content'];
+        }
+      }
+    }
+  }
+
+  $cleanAnswer = preg_replace('#<(?:thought|think|thinking|reasoning)>[\s\S]*?</(?:thought|think|thinking|reasoning)>#i', '', $answer) ?? $answer;
+  return [
+    'answer' => trim($cleanAnswer),
+    'thoughts' => trim($thoughts),
+  ];
+}
+
+/**
  * Attempt streaming an upstream SSE request. Only emits 200 headers once upstream is confirmed 2xx.
  */
 function ask_avi_stream_upstream(
@@ -97,7 +193,8 @@ function ask_avi_stream_upstream(
   string $protocol,
   string $modelLabel,
   int $startedMs,
-  ?array $reqUser
+  ?array $reqUser,
+  ?array $qaContext = null
 ): array {
   $ch = curl_init($url);
   if ($ch === false) {
@@ -107,6 +204,8 @@ function ask_avi_stream_upstream(
   $httpStatus = 0;
   $headersEmitted = false;
   $errorBuffer = '';
+  $rawSseBuffer = '';
+  $captureSse = is_array($qaContext) && (($qaContext['phase'] ?? 'final') === 'final');
   $streamDone = false;
 
   curl_setopt($ch, CURLOPT_POST, true);
@@ -127,6 +226,8 @@ function ask_avi_stream_upstream(
     &$httpStatus,
     &$headersEmitted,
     &$errorBuffer,
+    &$rawSseBuffer,
+    $captureSse,
     $protocol,
     $modelLabel
   ) {
@@ -143,6 +244,9 @@ function ask_avi_stream_upstream(
         header('X-Accel-Buffering: no');
         header('X-Ask-Avi-Protocol: ' . $protocol);
         header('X-Ask-Avi-Model: ' . $modelLabel);
+      }
+      if ($captureSse && strlen($rawSseBuffer) < 250000) {
+        $rawSseBuffer .= $chunk;
       }
       echo $chunk;
       if (function_exists('ob_flush')) {
@@ -169,6 +273,29 @@ function ask_avi_stream_upstream(
     $streamDone = true;
     $latencyMs = (int) round(microtime(true) * 1000) - $startedMs;
     ask_avi_record_chat_telemetry($reqUser, 200, $modelLabel, $latencyMs);
+
+    if ($captureSse && !empty($qaContext['promptText']) && function_exists('ask_avi_upsert_qa_turn')) {
+      $parsed = ask_avi_extract_answer_from_sse($rawSseBuffer, $protocol);
+      if ($parsed['answer'] !== '') {
+        ask_avi_upsert_qa_turn([
+          'id' => $qaContext['turnId'] ?? '',
+          'thread_id' => $qaContext['threadId'] ?? '',
+          'turn_index' => $qaContext['turnIndex'] ?? 1,
+          'user_email' => $reqUser['email'] ?? 'guest',
+          'user_name' => $reqUser['name'] ?? '',
+          'engine_id' => $qaContext['engineId'] ?? '',
+          'model_used' => $modelLabel,
+          'voice_style' => $qaContext['voiceStyle'] ?? 'standard',
+          'prompt_text' => $qaContext['promptText'],
+          'answer_text' => $parsed['answer'],
+          'thoughts_text' => $parsed['thoughts'],
+          'top_rag_score' => $qaContext['topRagScore'] ?? 0,
+          'rag_match_count' => $qaContext['ragMatchCount'] ?? 0,
+          'latency_ms' => $latencyMs,
+        ]);
+      }
+    }
+
     return ['ok' => true, 'done' => $streamDone];
   }
 
@@ -280,7 +407,8 @@ if ($mode === 'google') {
         'gemini',
         $model,
         $startedMs,
-        $reqUser
+        $reqUser,
+        $qaContext
       );
       if (!empty($attempt['ok'])) {
         exit;
@@ -347,7 +475,8 @@ if ($groqKey !== '') {
       'openai',
       $model . ' (Groq Free)',
       $startedMs,
-      $reqUser
+      $reqUser,
+      $qaContext
     );
     if (!empty($attempt['ok'])) {
       exit;
@@ -382,7 +511,8 @@ if ($openRouterKey !== '') {
       'openai',
       $model . ' (OpenRouter Free)',
       $startedMs,
-      $reqUser
+      $reqUser,
+      $qaContext
     );
     if (!empty($attempt['ok'])) {
       exit;

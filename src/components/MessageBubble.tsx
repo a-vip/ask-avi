@@ -10,8 +10,8 @@ import {
   KeyRound,
   Link2,
   LogIn,
+  Mail,
   Pencil,
-  Presentation,
   RotateCcw,
   Search,
   Sparkles,
@@ -19,9 +19,12 @@ import {
   ThumbsUp,
   Volume2,
   VolumeX,
+  X,
+  Presentation,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage, RetrievedSource } from '../types/chat';
+import { subscribeToDispatch } from '../utils/authClient';
 import {
   renderMarkdownToSafeHtml,
   resolveSourceUrl,
@@ -30,11 +33,29 @@ import {
 import { sanitizeThinkingTrace } from '../utils/thinking';
 import { AviAvatar } from './AviAvatar';
 
+interface SourcePreviewItem {
+  index: number;
+  title: string;
+  url: string;
+  snippet: string;
+  category: string;
+  date?: string;
+  doi?: string;
+  kind: 'archive' | 'web';
+}
+
+const DISPATCH_OPTIN_STORAGE_KEY = 'ask_avi_dispatch_optin_v1';
+
 interface MessageBubbleProps {
   message: ChatMessage;
   isLastAssistant: boolean;
+  assistantTurnCount?: number;
   isAdmin?: boolean;
   wpAdminUrl?: string;
+  userEmail?: string;
+  isMarketingOptedIn?: boolean;
+  proxyUrl?: string;
+  sessionToken?: string;
   onEditUserMessage: (messageId: string, newContent: string) => void;
   onRegenerate: (assistantMessageId: string) => void;
   onFollowUpClick: (prompt: string) => void;
@@ -48,8 +69,13 @@ interface MessageBubbleProps {
 export function MessageBubble({
   message,
   isLastAssistant,
+  assistantTurnCount = 1,
   isAdmin = false,
   wpAdminUrl,
+  userEmail,
+  isMarketingOptedIn = false,
+  proxyUrl,
+  sessionToken,
   onEditUserMessage,
   onRegenerate,
   onFollowUpClick,
@@ -65,18 +91,112 @@ export function MessageBubble({
   const [userExpandedOverride, setUserExpandedOverride] = useState<boolean | null>(null);
   const [speaking, setSpeaking] = useState(false);
   const [liveSec, setLiveSec] = useState<number>(0);
+  const [hoveredCite, setHoveredCite] = useState<{
+    index: number;
+    rect: { top: number; left: number; bottom: number };
+  } | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+
+  const [dispatchEmail, setDispatchEmail] = useState(userEmail ?? '');
+  const [dispatchDismissed, setDispatchDismissed] = useState(false);
+  const [dispatchState, setDispatchState] = useState<'idle' | 'submitting' | 'done' | 'error'>('idle');
+  const [dispatchError, setDispatchError] = useState('');
+
+  useEffect(() => {
+    if (userEmail && !dispatchEmail) {
+      setDispatchEmail(userEmail);
+    }
+  }, [userEmail, dispatchEmail]);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+    };
+  }, []);
+
+  const sourcePreviewByIndex = useMemo(() => {
+    const map = new Map<number, SourcePreviewItem>();
+    for (const src of message.sources ?? []) {
+      const idx = src.index;
+      map.set(idx, {
+        index: idx,
+        title: src.entry.title,
+        url: resolveSourceUrl(src.entry.url, src.entry.doi),
+        snippet: (src.snippet || src.entry.summary || '').replace(/\s+/g, ' ').trim(),
+        category: src.entry.category || 'Avi Archive',
+        date: src.entry.date,
+        doi: src.entry.doi,
+        kind: 'archive',
+      });
+    }
+    (message.webSources ?? []).forEach((ws, i) => {
+      const idx = ws.index || (message.sources?.length ?? 0) + i + 1;
+      const url = resolveSourceUrl(ws.url);
+      let host = 'Web Source';
+      try {
+        if (url) host = new URL(url).hostname.replace(/^www\./i, '');
+      } catch {
+        host = 'Web Source';
+      }
+      map.set(idx, {
+        index: idx,
+        title: ws.title,
+        url,
+        snippet: (ws.snippet || ws.title || '').replace(/\s+/g, ' ').trim(),
+        category: host,
+        kind: 'web',
+      });
+    });
+    return map;
+  }, [message.sources, message.webSources]);
+
+  const hoveredPreview = hoveredCite ? sourcePreviewByIndex.get(hoveredCite.index) ?? null : null;
+
+  const cancelClosePreview = () => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
+
+  const scheduleClosePreview = () => {
+    cancelClosePreview();
+    closeTimerRef.current = window.setTimeout(() => {
+      setHoveredCite(null);
+    }, 150);
+  };
+
+  const openPreviewForElement = (el: HTMLElement | null) => {
+    if (!el) return;
+    const idx = Number(el.getAttribute('data-cite-idx'));
+    if (!Number.isFinite(idx) || !sourcePreviewByIndex.has(idx)) return;
+    cancelClosePreview();
+    const rect = el.getBoundingClientRect();
+    setHoveredCite({
+      index: idx,
+      rect: { top: rect.top, left: rect.left, bottom: rect.bottom },
+    });
+  };
 
   const citationTargets = useMemo<CitationTarget[]>(() => {
     const archive = (message.sources ?? []).map((src) => ({
       index: src.index,
       url: resolveSourceUrl(src.entry.url, src.entry.doi),
       title: src.entry.title,
+      snippet: src.snippet || src.entry.summary,
+      category: src.entry.category,
+      date: src.entry.date,
+      kind: 'archive' as const,
     }));
     const web = (message.webSources ?? []).map((ws, i) => ({
       index: ws.index || archive.length + i + 1,
       url: resolveSourceUrl(ws.url),
       title: ws.title,
+      snippet: ws.snippet || ws.title,
+      kind: 'web' as const,
     }));
     return [...archive, ...web].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
   }, [message.sources, message.webSources]);
@@ -317,7 +437,36 @@ export function MessageBubble({
         <AviAvatar size={30} />
       </div>
 
-      <div className="msg-assistant-body">
+      <div
+        className="msg-assistant-body"
+        onMouseOver={(e) => {
+          const el = (e.target as HTMLElement | null)?.closest<HTMLElement>(
+            '.cite-pill[data-cite-idx], .source-chip-btn[data-cite-idx]'
+          );
+          if (el) openPreviewForElement(el);
+        }}
+        onMouseOut={(e) => {
+          const el = (e.target as HTMLElement | null)?.closest<HTMLElement>(
+            '.cite-pill[data-cite-idx], .source-chip-btn[data-cite-idx]'
+          );
+          const related = e.relatedTarget as HTMLElement | null;
+          if (el && !related?.closest('.cite-hover-card')) {
+            scheduleClosePreview();
+          }
+        }}
+        onFocusCapture={(e) => {
+          const el = (e.target as HTMLElement | null)?.closest<HTMLElement>(
+            '.cite-pill[data-cite-idx], .source-chip-btn[data-cite-idx]'
+          );
+          if (el) openPreviewForElement(el);
+        }}
+        onBlurCapture={(e) => {
+          const related = e.relatedTarget as HTMLElement | null;
+          if (!related?.closest('.cite-hover-card')) {
+            scheduleClosePreview();
+          }
+        }}
+      >
         <div className="msg-assistant-header">
           <span className="msg-speaker-name">Avi</span>
         </div>
@@ -340,6 +489,9 @@ export function MessageBubble({
                   ? `Thinking · ${durationSec}s`
                   : `Thought for ${durationSec}s`}
               </span>
+              {isActivelyThinking && message.thinkingPhase && (
+                <span className="ag-thinking-phase">{message.thinkingPhase}</span>
+              )}
               {isThinkingOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
             </button>
 
@@ -486,6 +638,7 @@ export function MessageBubble({
                         target="_blank"
                         rel="noopener noreferrer"
                         className="source-chip-btn web-source-chip"
+                        data-cite-idx={item.index}
                         title={`${item.ws.title} — ${item.ws.url}`}
                       >
                         <span className="source-chip-num">{item.index}</span>
@@ -504,6 +657,7 @@ export function MessageBubble({
                         target="_blank"
                         rel="noopener noreferrer"
                         className="source-chip-btn"
+                        data-cite-idx={item.index}
                         title={`${src.entry.title} — ${href}`}
                       >
                         <span className="source-chip-num">{item.index}</span>
@@ -516,6 +670,7 @@ export function MessageBubble({
                       key={src.entry.id}
                       type="button"
                       className="source-chip-btn"
+                      data-cite-idx={item.index}
                       onClick={() => onInspectSource(message.sources!, item.index)}
                       title={src.entry.title}
                     >
@@ -596,8 +751,166 @@ export function MessageBubble({
                 ))}
               </div>
             )}
+
+            {(() => {
+              const savedLocal =
+                typeof localStorage !== 'undefined' &&
+                localStorage.getItem(DISPATCH_OPTIN_STORAGE_KEY) === '1';
+              const shouldShowDispatch =
+                isLastAssistant &&
+                !isMarketingOptedIn &&
+                !savedLocal &&
+                !dispatchDismissed &&
+                (assistantTurnCount >= 2 || Boolean(message.isContentGap));
+              if (!shouldShowDispatch && dispatchState !== 'done') return null;
+
+              const handleSubmitDispatch = async (ev?: React.FormEvent) => {
+                if (ev) ev.preventDefault();
+                const targetEmail = (userEmail || dispatchEmail).trim();
+                if (!targetEmail || dispatchState === 'submitting') return;
+                setDispatchState('submitting');
+                setDispatchError('');
+                try {
+                  await subscribeToDispatch(
+                    targetEmail,
+                    message.gapTopic || message.sources?.[0]?.entry.title || '',
+                    sessionToken,
+                    proxyUrl
+                  );
+                  if (typeof localStorage !== 'undefined') {
+                    localStorage.setItem(DISPATCH_OPTIN_STORAGE_KEY, '1');
+                  }
+                  setDispatchState('done');
+                } catch (err) {
+                  setDispatchError(err instanceof Error ? err.message : 'Unable to subscribe.');
+                  setDispatchState('error');
+                }
+              };
+
+              return (
+                <div className="contextual-dispatch-bar" data-testid="contextual-dispatch-optin">
+                  {dispatchState === 'done' ? (
+                    <div className="contextual-dispatch-done">
+                      <Check size={14} />
+                      <span>Subscribed — new essays and dispatches from Avi will arrive in your inbox.</span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="contextual-dispatch-copy">
+                        <Mail size={14} />
+                        <span>
+                          {message.isContentGap
+                            ? 'Following an edge topic not yet covered in a full essay — get notified when Avi publishes on this?'
+                            : 'Want Avi’s next essays & dispatches when new research goes live?'}
+                        </span>
+                      </div>
+                      <form className="contextual-dispatch-form" onSubmit={handleSubmitDispatch}>
+                        {!userEmail && (
+                          <input
+                            type="email"
+                            value={dispatchEmail}
+                            onChange={(e) => setDispatchEmail(e.target.value)}
+                            placeholder="you@domain.com"
+                            aria-label="Email for new essays"
+                            className="contextual-dispatch-input"
+                            required
+                          />
+                        )}
+                        <button
+                          type="submit"
+                          className="contextual-dispatch-btn"
+                          disabled={dispatchState === 'submitting'}
+                        >
+                          {dispatchState === 'submitting'
+                            ? 'Saving…'
+                            : userEmail
+                              ? 'Get new essays →'
+                              : 'Notify me'}
+                        </button>
+                        <button
+                          type="button"
+                          className="contextual-dispatch-close"
+                          onClick={() => setDispatchDismissed(true)}
+                          aria-label="Dismiss newsletter suggestion"
+                          title="Dismiss"
+                        >
+                          <X size={13} />
+                        </button>
+                      </form>
+                      {dispatchError && (
+                        <div className="contextual-dispatch-error">{dispatchError}</div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
           </>
         )}
+
+        {hoveredCite && hoveredPreview && (() => {
+          const vw = typeof window !== 'undefined' ? window.innerWidth : 1024;
+          const vh = typeof window !== 'undefined' ? window.innerHeight : 768;
+          const cardWidth = Math.min(340, vw - 28);
+          const left = Math.max(14, Math.min(vw - cardWidth - 14, hoveredCite.rect.left - 24));
+          const placeAbove = hoveredCite.rect.bottom + 215 > vh && hoveredCite.rect.top > 220;
+          const top = placeAbove
+            ? Math.max(14, hoveredCite.rect.top - 12)
+            : Math.min(vh - 180, hoveredCite.rect.bottom + 10);
+
+          return (
+            <div
+              className={`cite-hover-card ${placeAbove ? 'place-above' : ''}`}
+              role="tooltip"
+              data-testid="cite-hover-preview"
+              style={{
+                left: `${left}px`,
+                top: `${top}px`,
+                width: `${cardWidth}px`,
+                transform: placeAbove ? 'translateY(-100%)' : undefined,
+              }}
+              onMouseEnter={cancelClosePreview}
+              onMouseLeave={scheduleClosePreview}
+            >
+              <div className="cite-hover-head">
+                <span className="cite-hover-num">[{hoveredPreview.index}]</span>
+                <span className="cite-hover-cat">{hoveredPreview.category}</span>
+                {hoveredPreview.date && <span className="cite-hover-date">{hoveredPreview.date}</span>}
+              </div>
+              <div className="cite-hover-title">{hoveredPreview.title}</div>
+              {hoveredPreview.snippet && (
+                <blockquote className="cite-hover-quote">
+                  &ldquo;{hoveredPreview.snippet}&rdquo;
+                </blockquote>
+              )}
+              <div className="cite-hover-actions">
+                {hoveredPreview.url && (
+                  <a
+                    href={hoveredPreview.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="cite-hover-link"
+                  >
+                    <span>Read original source</span>
+                    <ExternalLink size={11} />
+                  </a>
+                )}
+                {hoveredPreview.kind === 'archive' && message.sources && (
+                  <button
+                    type="button"
+                    className="cite-hover-dossier-btn"
+                    onClick={() => {
+                      setHoveredCite(null);
+                      onInspectSource(message.sources!, hoveredPreview.index);
+                    }}
+                  >
+                    Open in Dossier
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </article>
   );

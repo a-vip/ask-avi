@@ -11,6 +11,7 @@ ask_avi_ensure_tables();
 global $wpdb;
 $users_table = $wpdb->prefix . 'ask_avi_users';
 $logs_table = $wpdb->prefix . 'ask_avi_logs';
+$qa_table = $wpdb->prefix . 'ask_avi_qa_logs';
 $settings = ask_avi_get_settings();
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -86,6 +87,14 @@ function ask_avi_is_request_admin(?array $reqUser): bool {
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
   $action = $_GET['action'] ?? '';
 
+  if ($action === 'live_knowledge') {
+    $forceRefresh = !empty($_GET['refresh']);
+    $live = function_exists('ask_avi_get_live_wp_knowledge')
+      ? ask_avi_get_live_wp_knowledge($forceRefresh)
+      : ['ok' => true, 'generatedAt' => gmdate('c'), 'totalEntries' => 0, 'entries' => []];
+    ask_avi_send_json(200, $live);
+  }
+
   if ($action === 'admin_overview') {
     if (!$reqUser && !ask_avi_is_request_admin($reqUser)) {
       ask_avi_send_json(401, ['ok' => false, 'error' => 'Authentication required.']);
@@ -106,11 +115,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
       ARRAY_A
     ) ?: [];
 
+    $qaRows = $wpdb->get_results(
+      "SELECT id, ts, thread_id, turn_index, user_email, user_name, engine_id, model_used, voice_style, prompt_text, answer_text, top_rag_score, rag_match_count, is_content_gap, gap_topic, latency_ms
+       FROM {$qa_table} ORDER BY ts DESC LIMIT 100",
+      ARRAY_A
+    ) ?: [];
+
     $dayAgoMs = (int) round(microtime(true) * 1000) - (24 * 60 * 60 * 1000);
     $totalUsers = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$users_table}");
     $optInCount = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$users_table} WHERE marketing_opt_in = 1");
     $totalChats = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$logs_table} WHERE type IN ('chat_ok','chat_error')");
     $errorCount = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$logs_table} WHERE level = 'error'");
+    $totalQaTurns = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$qa_table}");
+    $contentGapCount = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$qa_table} WHERE is_content_gap = 1");
     $last24hChats = (int) $wpdb->get_var(
       $wpdb->prepare("SELECT COUNT(*) FROM {$logs_table} WHERE ts >= %d AND type IN ('chat_ok','chat_error')", $dayAgoMs)
     );
@@ -123,7 +140,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         'totalChats' => $totalChats,
         'errorCount' => $errorCount,
         'last24hChats' => $last24hChats,
+        'totalQaTurns' => $totalQaTurns,
+        'contentGapCount' => $contentGapCount,
       ],
+      'qaLogs' => array_map(static fn($q) => [
+        'id' => $q['id'],
+        'ts' => (int) $q['ts'],
+        'threadId' => $q['thread_id'],
+        'turnIndex' => (int) $q['turn_index'],
+        'userEmail' => $q['user_email'],
+        'userName' => $q['user_name'],
+        'engineId' => $q['engine_id'],
+        'modelUsed' => $q['model_used'],
+        'voiceStyle' => $q['voice_style'],
+        'promptText' => $q['prompt_text'],
+        'answerText' => $q['answer_text'],
+        'topRagScore' => (float) $q['top_rag_score'],
+        'ragMatchCount' => (int) $q['rag_match_count'],
+        'isContentGap' => !empty($q['is_content_gap']),
+        'gapTopic' => $q['gap_topic'],
+        'latencyMs' => (int) $q['latency_ms'],
+      ], $qaRows),
       'users' => array_map(static fn($u) => [
         'id' => $u['id'],
         'name' => $u['name'],
@@ -532,6 +569,86 @@ if ($action === 'save_server_settings') {
       'adminPasscode' => !empty($fresh['admin_passcode']),
     ],
   ]);
+}
+
+if ($action === 'record_qa_turn') {
+  $promptText = trim((string) ($body['promptText'] ?? ''));
+  if ($promptText === '') {
+    ask_avi_send_json(400, ['ok' => false, 'error' => 'Missing promptText.']);
+  }
+  $citedRaw = $body['citedSources'] ?? [];
+  $citedJson = is_array($citedRaw) ? (string) json_encode($citedRaw) : '';
+  ask_avi_upsert_qa_turn([
+    'id' => (string) ($body['turnId'] ?? ''),
+    'thread_id' => (string) ($body['threadId'] ?? ''),
+    'turn_index' => isset($body['turnIndex']) ? (int) $body['turnIndex'] : 1,
+    'user_email' => $reqUser['email'] ?? 'guest',
+    'user_name' => $reqUser['name'] ?? '',
+    'engine_id' => (string) ($body['engineId'] ?? ''),
+    'model_used' => (string) ($body['modelUsed'] ?? ''),
+    'voice_style' => (string) ($body['voiceStyle'] ?? 'standard'),
+    'prompt_text' => $promptText,
+    'answer_text' => (string) ($body['answerText'] ?? ''),
+    'thoughts_text' => (string) ($body['thoughtsText'] ?? ''),
+    'cited_sources_json' => $citedJson,
+    'top_rag_score' => isset($body['topRagScore']) ? (float) $body['topRagScore'] : 0.0,
+    'rag_match_count' => isset($body['ragMatchCount']) ? (int) $body['ragMatchCount'] : 0,
+    'is_content_gap' => !empty($body['isContentGap']),
+    'gap_topic' => (string) ($body['gapTopic'] ?? ''),
+    'latency_ms' => isset($body['latencyMs']) ? (int) $body['latencyMs'] : 0,
+  ]);
+  ask_avi_send_json(200, ['ok' => true]);
+}
+
+if ($action === 'subscribe_dispatch') {
+  $email = strtolower(trim((string) ($body['email'] ?? ($reqUser['email'] ?? ''))));
+  if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+    ask_avi_send_json(400, ['ok' => false, 'error' => 'Please enter a valid email address.']);
+  }
+  $name = trim((string) ($body['name'] ?? ($reqUser['name'] ?? '')));
+  if ($name === '') {
+    $name = explode('@', $email)[0];
+  }
+  $topicHint = trim((string) ($body['topicHint'] ?? ''));
+
+  ask_avi_sync_wp_lead($email);
+
+  $nowMs = (int) round(microtime(true) * 1000);
+  $existing = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$users_table} WHERE email = %s", $email), ARRAY_A);
+  if ($existing) {
+    $wpdb->update(
+      $users_table,
+      ['marketing_opt_in' => 1, 'last_seen_at' => $nowMs],
+      ['id' => $existing['id']]
+    );
+  } else {
+    ask_avi_insert_user_row($users_table, [
+      'id' => 'sub_' . bin2hex(random_bytes(5)),
+      'email' => $email,
+      'name' => function_exists('sanitize_text_field') ? sanitize_text_field($name) : $name,
+      'picture' => null,
+      'provider' => 'dispatch',
+      'role' => 'user',
+      'password_hash' => null,
+      'marketing_opt_in' => 1,
+      'created_at' => $nowMs,
+      'last_seen_at' => $nowMs,
+      'login_count' => 0,
+      'chat_count' => 0,
+      'error_count' => 0,
+    ]);
+  }
+
+  ask_avi_record_log([
+    'type' => 'dispatch_optin',
+    'level' => 'info',
+    'user_email' => $email,
+    'status_code' => 200,
+    'message' => $topicHint !== ''
+      ? 'Subscribed to dispatches from Ask Avi topic: ' . substr($topicHint, 0, 120)
+      : 'Subscribed to dispatches from Ask Avi conversation.',
+  ]);
+  ask_avi_send_json(200, ['ok' => true, 'email' => $email]);
 }
 
 if ($action === 'telemetry') {

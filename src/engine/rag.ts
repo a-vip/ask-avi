@@ -62,12 +62,42 @@ function normalizeQueryTokens(query: string): string[] {
   return Array.from(new Set([...base, ...extra]));
 }
 
-class KnowledgeIndex {
-  private readonly docs: IndexedDoc[] = [];
-  private readonly df = new Map<string, number>();
-  private readonly avgDocLen: number;
+function normalizeEntryUrl(url: string): string {
+  return url
+    .trim()
+    .replace(/^https?:\/\/(www\.)?/i, '')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+}
 
-  constructor(entries: KnowledgeEntry[]) {
+function tagInitialJustPublished(entries: KnowledgeEntry[]): KnowledgeEntry[] {
+  const dated = entries
+    .filter((e) => Boolean(e.date))
+    .slice()
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const recentIds = new Set(dated.slice(0, 6).map((e) => e.id));
+  return entries.map((e) =>
+    recentIds.has(e.id) ? { ...e, justPublished: true } : e
+  );
+}
+
+class KnowledgeIndex {
+  private entries: KnowledgeEntry[] = [];
+  private docs: IndexedDoc[] = [];
+  private df = new Map<string, number>();
+  private avgDocLen = 1;
+  private listeners = new Set<() => void>();
+  private syncInFlight: Promise<number> | null = null;
+  private lastSyncAt = 0;
+
+  constructor(initialEntries: KnowledgeEntry[]) {
+    this.entries = tagInitialJustPublished(initialEntries);
+    this.buildIndex(this.entries);
+  }
+
+  private buildIndex(entries: KnowledgeEntry[]): void {
+    this.docs = [];
+    this.df = new Map<string, number>();
     let totalLen = 0;
 
     for (const entry of entries) {
@@ -100,15 +130,131 @@ class KnowledgeIndex {
     }
 
     this.avgDocLen = entries.length > 0 ? totalLen / entries.length : 1;
+    KNOWLEDGE_META.totalEntries = entries.length;
+  }
+
+  public subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private notifyListeners(): void {
+    for (const fn of this.listeners) {
+      try {
+        fn();
+      } catch {
+        // Ignore subscriber error
+      }
+    }
+  }
+
+  public upsertEntries(incoming: KnowledgeEntry[]): number {
+    if (!incoming || incoming.length === 0) return 0;
+
+    const next = [...this.entries];
+    const indexById = new Map<string, number>();
+    const indexByUrl = new Map<string, number>();
+
+    next.forEach((e, idx) => {
+      indexById.set(e.id, idx);
+      const norm = normalizeEntryUrl(e.url);
+      if (norm) indexByUrl.set(norm, idx);
+    });
+
+    let changed = 0;
+    const brandNew: KnowledgeEntry[] = [];
+
+    for (const item of incoming) {
+      if (!item || !item.title || !Array.isArray(item.chunks) || item.chunks.length === 0) {
+        continue;
+      }
+      const normUrl = normalizeEntryUrl(item.url);
+      const existingIdx =
+        indexById.get(item.id) ?? (normUrl ? indexByUrl.get(normUrl) : undefined);
+
+      if (existingIdx !== undefined) {
+        const prev = next[existingIdx];
+        const hashChanged =
+          Boolean(item.contentHash && prev.contentHash !== item.contentHash) ||
+          Boolean(item.justPublished !== prev.justPublished) ||
+          item.chunks.length !== prev.chunks.length ||
+          item.summary !== prev.summary;
+
+        if (hashChanged) {
+          next[existingIdx] = {
+            ...prev,
+            ...item,
+            id: prev.id,
+            liveIngested: true,
+          };
+          changed += 1;
+        }
+      } else {
+        brandNew.push({ ...item, liveIngested: true });
+        changed += 1;
+      }
+    }
+
+    if (changed === 0) return 0;
+
+    this.entries = tagInitialJustPublished([...brandNew, ...next]);
+    this.buildIndex(this.entries);
+    this.notifyListeners();
+    return changed;
+  }
+
+  public async syncLiveWordPressKnowledge(authEndpointUrl?: string): Promise<number> {
+    if (!authEndpointUrl || typeof fetch === 'undefined') return 0;
+    if (this.syncInFlight) return this.syncInFlight;
+    if (Date.now() - this.lastSyncAt < 60_000) return 0;
+
+    this.syncInFlight = (async () => {
+      try {
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timer = controller ? setTimeout(() => controller.abort(), 6000) : null;
+        const sep = authEndpointUrl.includes('?') ? '&' : '?';
+        const res = await fetch(`${authEndpointUrl}${sep}action=live_knowledge`, {
+          method: 'GET',
+          credentials: 'same-origin',
+          signal: controller?.signal,
+        });
+        if (timer) clearTimeout(timer);
+        if (!res.ok) return 0;
+        const data = (await res.json()) as {
+          ok?: boolean;
+          entries?: KnowledgeEntry[];
+        };
+        this.lastSyncAt = Date.now();
+        if (data?.ok && Array.isArray(data.entries)) {
+          return this.upsertEntries(data.entries);
+        }
+        return 0;
+      } catch {
+        return 0;
+      } finally {
+        this.syncInFlight = null;
+      }
+    })();
+
+    return this.syncInFlight;
   }
 
   public getAllEntries(): KnowledgeEntry[] {
-    return corpus.entries;
+    return this.entries;
+  }
+
+  public getJustPublishedEntries(): KnowledgeEntry[] {
+    return this.entries
+      .filter((e) => Boolean(e.justPublished))
+      .slice()
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   }
 
   public getCategories(): string[] {
     const counts = new Map<string, number>();
-    for (const entry of corpus.entries) {
+    for (const entry of this.entries) {
       counts.set(entry.category, (counts.get(entry.category) ?? 0) + 1);
     }
     return ['All', ...Array.from(counts.keys()).sort()];
@@ -251,9 +397,10 @@ function pickBestSnippet(entry: KnowledgeEntry, matchedTerms: string[]): string 
   return joined.length > 720 ? joined.slice(0, 717).trimEnd() + '…' : joined;
 }
 
-export const knowledgeIndex = new KnowledgeIndex(corpus.entries);
 export const KNOWLEDGE_META = {
   totalEntries: corpus.totalEntries,
   generatedAt: corpus.generatedAt,
   canonicalSite: corpus.canonicalSite,
 };
+
+export const knowledgeIndex = new KnowledgeIndex(corpus.entries);

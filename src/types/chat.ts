@@ -21,6 +21,9 @@ export interface KnowledgeEntry {
   keywords: string[];
   summary: string;
   chunks: string[];
+  justPublished?: boolean;
+  liveIngested?: boolean;
+  contentHash?: string;
 }
 
 export interface KnowledgeCorpus {
@@ -64,6 +67,7 @@ export interface ChatMessage {
   content: string;
   thoughts?: string;
   thinkingMs?: number;
+  thinkingPhase?: string;
   isThinking?: boolean;
   webSearchQueries?: string[];
   webSources?: WebSource[];
@@ -73,6 +77,11 @@ export interface ChatMessage {
   voiceStyle?: VoiceStyle;
   sources?: RetrievedSource[];
   retrievalMs?: number;
+  topRagScore?: number;
+  ragMatchCount?: number;
+  isContentGap?: boolean;
+  gapTopic?: string;
+  complexityTier?: 'fast-trivial' | 'focused-direct' | 'deep-deliberative';
   followUps?: string[];
   attachedContext?: AttachedContext;
   attachedContexts?: AttachedContext[];

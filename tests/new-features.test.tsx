@@ -7,11 +7,14 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import { KnowledgeDrawer, JUST_PUBLISHED_FILTER } from '../src/components/KnowledgeDrawer';
 import { MessageBubble } from '../src/components/MessageBubble';
+import { Sidebar } from '../src/components/Sidebar';
+import { TopBar } from '../src/components/TopBar';
 import { WelcomeScreen } from '../src/components/WelcomeScreen';
 import { getEligibleGreetings, resolveVisitorSignals } from '../src/data/greetings';
 import { buildFinalContinuityBrief, classifyQueryComplexity } from '../src/engine/deliberation';
 import { knowledgeIndex } from '../src/engine/rag';
-import type { ChatMessage } from '../src/types/chat';
+import type { ChatMessage, ChatThread } from '../src/types/chat';
+import { loadThreads, mergeThreadLists, saveThreads } from '../src/utils/storage';
 
 describe('Ask Avi v20261119a feature suite', () => {
   const roots: Array<{ root: Root; container: HTMLDivElement }> = [];
@@ -264,5 +267,164 @@ describe('Ask Avi v20261119a feature suite', () => {
     const optIn = container.querySelector('[data-testid="contextual-dispatch-optin"]');
     expect(optIn).not.toBeNull();
     expect(optIn?.textContent).toContain('not yet covered in a full essay');
+  });
+
+  it('merges local and remote thread lists without dropping newer messages and isolates account-scoped storage', () => {
+    const olderThread: ChatThread = {
+      id: 'th-shared',
+      title: 'Initial',
+      createdAt: 1000,
+      updatedAt: 2000,
+      messages: [
+        { id: 'u1', role: 'user', content: 'Q1', createdAt: 1000 },
+        { id: 'a1', role: 'assistant', content: 'A1', createdAt: 2000 },
+      ],
+    };
+    const fullerRemoteThread: ChatThread = {
+      id: 'th-shared',
+      title: 'Follow-up Discussion',
+      createdAt: 1000,
+      updatedAt: 4000,
+      pinned: true,
+      messages: [
+        { id: 'u1', role: 'user', content: 'Q1', createdAt: 1000 },
+        { id: 'a1', role: 'assistant', content: 'A1', createdAt: 2000 },
+        { id: 'u2', role: 'user', content: 'Q2', createdAt: 3000 },
+        { id: 'a2', role: 'assistant', content: 'A2', createdAt: 4000 },
+      ],
+    };
+    const remoteOnlyThread: ChatThread = {
+      id: 'th-remote-only',
+      title: 'Saved on phone',
+      createdAt: 1500,
+      updatedAt: 3500,
+      messages: [
+        { id: 'u3', role: 'user', content: 'Hello', createdAt: 1500 },
+        { id: 'a3', role: 'assistant', content: 'Hi', createdAt: 3500 },
+      ],
+    };
+
+    const merged = mergeThreadLists([olderThread], [fullerRemoteThread, remoteOnlyThread]);
+    expect(merged.map((t) => t.id)).toEqual(['th-shared', 'th-remote-only']);
+    expect(merged[0].messages).toHaveLength(4);
+    expect(merged[0].pinned).toBe(true);
+
+    // Account-scoped storage isolation + legacy migration
+    localStorage.setItem('ask_avi_threads_v1', JSON.stringify([olderThread]));
+    const aliceMigrated = loadThreads('Alice@Example.com');
+    expect(aliceMigrated).toHaveLength(1);
+    expect(localStorage.getItem('ask_avi_threads_v1')).toBeNull();
+    expect(localStorage.getItem('ask_avi_threads_v1:alice@example.com')).not.toBeNull();
+
+    saveThreads([remoteOnlyThread], 'bob@example.com');
+    expect(loadThreads('bob@example.com')[0].id).toBe('th-remote-only');
+    expect(loadThreads('alice@example.com')[0].id).toBe('th-shared');
+    expect(loadThreads(null)).toEqual([]);
+  });
+
+  it('encourages guests to sign in to save chats across Sidebar and TopBar, while confirming sync when signed in', () => {
+    const onOpenSignIn = vi.fn();
+
+    const guestSidebar = mount(
+      <Sidebar
+        isOpen={true}
+        isMobile={false}
+        threads={[]}
+        activeThreadId={null}
+        theme="dark"
+        userProfile={null}
+        onCloseMobile={vi.fn()}
+        onToggleCollapse={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+        onRenameThread={vi.fn()}
+        onPinThread={vi.fn()}
+        onDeleteThread={vi.fn()}
+        onOpenKnowledge={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onToggleTheme={vi.fn()}
+        onOpenHelp={vi.fn()}
+        onOpenAbout={vi.fn()}
+        onOpenSignIn={onOpenSignIn}
+        onSignOut={vi.fn()}
+      />
+    );
+    expect(guestSidebar.textContent).toContain('Save your chat history');
+    expect(guestSidebar.textContent).toContain('Sign in to save chats');
+    expect(guestSidebar.textContent).not.toContain('Your conversations are saved privately in this browser.');
+
+    const saveBtn = guestSidebar.querySelector<HTMLButtonElement>('.sidebar-save-btn');
+    act(() => {
+      saveBtn?.click();
+    });
+    expect(onOpenSignIn).toHaveBeenCalledTimes(1);
+
+    const signedInSidebar = mount(
+      <Sidebar
+        isOpen={true}
+        isMobile={false}
+        threads={[]}
+        activeThreadId={null}
+        theme="dark"
+        userProfile={{ name: 'Avi Perera', email: 'workwithavip@gmail.com', isAdmin: true, signedInAt: 1 }}
+        onCloseMobile={vi.fn()}
+        onToggleCollapse={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+        onRenameThread={vi.fn()}
+        onPinThread={vi.fn()}
+        onDeleteThread={vi.fn()}
+        onOpenKnowledge={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onToggleTheme={vi.fn()}
+        onOpenHelp={vi.fn()}
+        onOpenAbout={vi.fn()}
+        onOpenSignIn={vi.fn()}
+        onSignOut={vi.fn()}
+      />
+    );
+    expect(signedInSidebar.querySelector('.sidebar-save-card')).toBeNull();
+    expect(signedInSidebar.textContent).toContain('Saved to your account');
+
+    const topBarGuest = mount(
+      <TopBar
+        sidebarOpen={false}
+        theme="dark"
+        isTemporaryChat={false}
+        canExport={true}
+        knowledgeOpen={false}
+        isAuthenticated={false}
+        hasMessages={true}
+        onOpenSignIn={onOpenSignIn}
+        onOpenSidebar={vi.fn()}
+        onToggleTheme={vi.fn()}
+        onToggleTemporary={vi.fn()}
+        onExportChat={vi.fn()}
+        onToggleKnowledge={vi.fn()}
+      />
+    );
+    const topBarBtn = topBarGuest.querySelector<HTMLButtonElement>('.topbar-signin-save-btn');
+    expect(topBarBtn?.textContent).toContain('Sign in to save chat');
+    act(() => {
+      topBarBtn?.click();
+    });
+    expect(onOpenSignIn).toHaveBeenCalledTimes(2);
+  });
+
+  it('defines theme-matched custom scrollbars (no native white scrollbar or arrows)', () => {
+    const proc = (
+      globalThis as unknown as {
+        process?: {
+          cwd: () => string;
+          getBuiltinModule?: (id: string) => { readFileSync: (p: string, enc: string) => string };
+        };
+      }
+    ).process;
+    const fsMod = proc?.getBuiltinModule?.('node:fs');
+    const cssText = fsMod?.readFileSync(`${proc!.cwd()}/src/styles/index.css`, 'utf8') ?? '';
+    expect(cssText).toContain('color-scheme: dark;');
+    expect(cssText).toContain('color-scheme: light;');
+    expect(cssText).toContain('::-webkit-scrollbar-button');
+    expect(cssText).toContain('.ag-thinking-body.live-scroll::-webkit-scrollbar');
   });
 });

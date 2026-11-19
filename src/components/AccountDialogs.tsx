@@ -564,7 +564,7 @@ export function AccountInfoModal({
                   <h3>Persona, Grounding &amp; Privacy</h3>
                 </div>
                 <p className="settings-desc">
-                  Ask Avi pairs generative reasoning with optional live open-web verification and 108 indexed dossiers across International Humanitarian Law (LAWS), AI governance, philosophy, SovDash, and Lex Machina. Conversation threads remain stored locally in your own browser.
+                  Ask Avi pairs generative reasoning with optional live open-web verification and 108 indexed dossiers across International Humanitarian Law (LAWS), AI governance, philosophy, SovDash, and Lex Machina. Signed-in accounts automatically save and sync conversation threads across sessions and devices; guest sessions remain temporary until you sign in.
                 </p>
               </section>
 

@@ -11,11 +11,14 @@ import { ENGINE_OPTIONS } from './data/persona';
 import { AuthRequiredError, BackendNotConfiguredError, llmService } from './engine/llmService';
 import { knowledgeIndex } from './engine/rag';
 import {
+  deleteUserThreadRemote,
   fetchAuthConfig,
   isVerifiedAdmin,
   reportClientTelemetry,
   reportCompletedQaTurn,
   resolveEffectiveAuthUrl,
+  saveUserThreadRemote,
+  syncUserThreads,
   type AuthConfigResponse,
 } from './utils/authClient';
 import { allocateContextBudget, getContextBudgetLimits } from './utils/contextExtractor';
@@ -32,11 +35,14 @@ import type {
 } from './types/chat';
 import {
   applyThemeToDocument,
+  clearGuestThreads,
   deriveThreadTitle,
   exportThreadAsMarkdown,
+  loadGuestThreads,
   loadSettings,
   loadThreads,
   loadUserProfile,
+  mergeThreadLists,
   postParentBridgeEvent,
   saveSettings,
   saveThreads,
@@ -48,8 +54,10 @@ function makeId(prefix: string): string {
 }
 
 export default function App() {
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(() => loadUserProfile());
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
-  const [threads, setThreads] = useState<ChatThread[]>(() => loadThreads());
+  const [threads, setThreads] = useState<ChatThread[]>(() => loadThreads(loadUserProfile()?.email));
+  const [isSyncingThreads, setIsSyncingThreads] = useState(false);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [tempThread, setTempThread] = useState<ChatThread | null>(null);
   const [isTemporaryChat, setIsTemporaryChat] = useState(false);
@@ -71,7 +79,6 @@ export default function App() {
   const [drawerFocusIdx, setDrawerFocusIdx] = useState<number | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'general' | 'admin' | 'developer'>('general');
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(() => loadUserProfile());
   const [authConfig, setAuthConfig] = useState<AuthConfigResponse | null>(null);
   const [signInOpen, setSignInOpen] = useState(false);
   const [accountInfoMode, setAccountInfoMode] = useState<'help' | 'about' | null>(null);
@@ -83,6 +90,9 @@ export default function App() {
 
   const isAdmin = isVerifiedAdmin(userProfile);
 
+  const threadsRef = useRef<ChatThread[]>(threads);
+  threadsRef.current = threads;
+  const syncedKeyRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -102,10 +112,10 @@ export default function App() {
     postParentBridgeEvent('theme-change', { theme: settings.theme });
   }, [settings]);
 
-  // Persist saved threads
+  // Persist saved threads (account-scoped when signed in, session-scoped for guests)
   useEffect(() => {
-    saveThreads(threads);
-  }, [threads]);
+    saveThreads(threads, userProfile?.email);
+  }, [threads, userProfile?.email]);
 
   // Signal parent iframe readiness + listen for host theme transitions
   useEffect(() => {
@@ -239,11 +249,91 @@ export default function App() {
     void knowledgeIndex.syncLiveWordPressKnowledge(resolveEffectiveAuthUrl(settings.proxyUrl));
   }, [settings.proxyUrl]);
 
+  useEffect(() => {
+    const email = userProfile?.email?.trim().toLowerCase() || '';
+    if (!email) {
+      syncedKeyRef.current = null;
+      setIsSyncingThreads(false);
+      return;
+    }
+
+    const localAccountThreads = loadThreads(email);
+    const guestThreads = loadGuestThreads();
+    const mergedLocal = mergeThreadLists(
+      threadsRef.current,
+      mergeThreadLists(localAccountThreads, guestThreads)
+    );
+    if (mergedLocal.length > 0 && mergedLocal.length !== threadsRef.current.length) {
+      setThreads(mergedLocal);
+    }
+
+    const hasAuthChannel = Boolean(
+      userProfile?.sessionToken || userProfile?.provider === 'wordpress'
+    );
+    if (!hasAuthChannel) {
+      clearGuestThreads();
+      return;
+    }
+
+    const syncKey = `${email}:${userProfile?.sessionToken ?? 'wp'}`;
+    if (syncedKeyRef.current === syncKey) return;
+    syncedKeyRef.current = syncKey;
+
+    let active = true;
+    setIsSyncingThreads(true);
+    void syncUserThreads(mergedLocal, userProfile?.sessionToken, settings.proxyUrl)
+      .then((remoteThreads) => {
+        if (!active) return;
+        clearGuestThreads();
+        if (remoteThreads) {
+          setThreads((prev) => mergeThreadLists(prev, remoteThreads));
+        }
+      })
+      .finally(() => {
+        if (active) setIsSyncingThreads(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [userProfile?.email, userProfile?.sessionToken, userProfile?.provider, settings.proxyUrl]);
+
+  const handleSignOut = useCallback(() => {
+    if (
+      !isTemporaryChat &&
+      userProfile?.email &&
+      threadsRef.current.length > 0 &&
+      (userProfile.sessionToken || userProfile.provider === 'wordpress')
+    ) {
+      void syncUserThreads(threadsRef.current, userProfile.sessionToken, settings.proxyUrl);
+    }
+    clearGuestThreads();
+    syncedKeyRef.current = null;
+    setUserProfile(null);
+    setPendingEngineAfterAuth(null);
+    setThreads([]);
+    setActiveThreadId(null);
+    setTempThread(null);
+  }, [
+    isTemporaryChat,
+    settings.proxyUrl,
+    userProfile?.email,
+    userProfile?.provider,
+    userProfile?.sessionToken,
+  ]);
+
   const handleClearAllThreads = useCallback(() => {
     setThreads([]);
     setActiveThreadId(null);
     setTempThread(null);
-  }, []);
+    if (userProfile?.email && (userProfile.sessionToken || userProfile.provider === 'wordpress')) {
+      void deleteUserThreadRemote(
+        { clearAll: true },
+        userProfile.sessionToken,
+        settings.proxyUrl
+      );
+    }
+  }, [settings.proxyUrl, userProfile?.email, userProfile?.provider, userProfile?.sessionToken]);
 
   const handleExportAllThreads = useCallback(() => {
     const payload = JSON.stringify({ exportedAt: new Date().toISOString(), threads }, null, 2);
@@ -360,33 +450,76 @@ export default function App() {
           },
         });
 
+        const finishedAt = Date.now();
+        const finalFields: Partial<ChatMessage> = {
+          content: result.content,
+          thoughts: result.thoughts,
+          isThinking: false,
+          thinkingMs: result.thinkingMs,
+          thinkingPhase: undefined,
+          webSearchQueries: result.webSearchQueries,
+          webSources: result.webSources,
+          engineUsed: result.engineUsed,
+          modelLabel: result.modelLabel,
+          sources: result.sources,
+          retrievalMs: result.retrievalMs,
+          topRagScore: result.topRagScore,
+          ragMatchCount: result.ragMatchCount,
+          isContentGap: result.isContentGap,
+          gapTopic: result.gapTopic,
+          complexityTier: result.complexityTier,
+          followUps: result.followUps,
+          isStreaming: false,
+        };
+
         updateThreadMessages(threadId, (msgs) =>
-          msgs.map((m) =>
-            m.id === assistantMsgId
-              ? {
-                  ...m,
-                  content: result.content,
-                  thoughts: result.thoughts,
-                  isThinking: false,
-                  thinkingMs: result.thinkingMs,
-                  thinkingPhase: undefined,
-                  webSearchQueries: result.webSearchQueries,
-                  webSources: result.webSources,
-                  engineUsed: result.engineUsed,
-                  modelLabel: result.modelLabel,
-                  sources: result.sources,
-                  retrievalMs: result.retrievalMs,
-                  topRagScore: result.topRagScore,
-                  ragMatchCount: result.ragMatchCount,
-                  isContentGap: result.isContentGap,
-                  gapTopic: result.gapTopic,
-                  complexityTier: result.complexityTier,
-                  followUps: result.followUps,
-                  isStreaming: false,
-                }
-              : m
-          )
+          msgs.map((m) => (m.id === assistantMsgId ? { ...m, ...finalFields } : m))
         );
+
+        if (
+          !isTemporaryChat &&
+          userProfile?.email &&
+          (userProfile.sessionToken || userProfile.provider === 'wordpress')
+        ) {
+          const baseThread = threadsRef.current.find((t) => t.id === threadId);
+          const remoteSnapshot: ChatThread = baseThread
+            ? {
+                ...baseThread,
+                updatedAt: finishedAt,
+                messages: baseThread.messages.map((m) =>
+                  m.id === assistantMsgId ? { ...m, ...finalFields } : m
+                ),
+              }
+            : {
+                id: threadId,
+                title: deriveThreadTitle(queryText),
+                createdAt: finishedAt,
+                updatedAt: finishedAt,
+                messages: [
+                  ...historyBeforeQuery,
+                  {
+                    id: `u_${assistantMsgId}`,
+                    role: 'user',
+                    content: queryText,
+                    createdAt: finishedAt - 1,
+                    attachedContexts: attached && attached.length > 0 ? attached : undefined,
+                  },
+                  {
+                    id: assistantMsgId,
+                    role: 'assistant',
+                    content: result.content,
+                    createdAt: finishedAt,
+                    voiceStyle: settings.voiceStyle,
+                    ...finalFields,
+                  },
+                ],
+              };
+          void saveUserThreadRemote(
+            remoteSnapshot,
+            userProfile.sessionToken,
+            settings.proxyUrl
+          );
+        }
 
         void reportCompletedQaTurn(
           {
@@ -473,6 +606,9 @@ export default function App() {
       settings.geminiApiKey,
       settings.proxyUrl,
       settings.customApi,
+      isTemporaryChat,
+      userProfile?.email,
+      userProfile?.provider,
       userProfile?.sessionToken,
       updateThreadMessages,
     ]
@@ -755,6 +891,7 @@ export default function App() {
         activeThreadId={activeThread?.id ?? null}
         theme={settings.theme}
         userProfile={userProfile}
+        isSyncingThreads={isSyncingThreads}
         onCloseMobile={() => setSidebarOpen(false)}
         onToggleCollapse={() => setSidebarOpen(false)}
         onNewChat={handleNewChat}
@@ -762,19 +899,54 @@ export default function App() {
           setIsTemporaryChat(false);
           setActiveThreadId(id);
         }}
-        onRenameThread={(id, title) =>
-          setThreads((prev) => prev.map((t) => (t.id === id ? { ...t, title } : t)))
-        }
-        onPinThread={(id) =>
+        onRenameThread={(id, title) => {
+          const now = Date.now();
+          const target = threadsRef.current.find((t) => t.id === id);
+          setThreads((prev) =>
+            prev.map((t) => (t.id === id ? { ...t, title, updatedAt: now } : t))
+          );
+          if (
+            target &&
+            userProfile?.email &&
+            (userProfile.sessionToken || userProfile.provider === 'wordpress')
+          ) {
+            void saveUserThreadRemote(
+              { ...target, title, updatedAt: now },
+              userProfile.sessionToken,
+              settings.proxyUrl
+            );
+          }
+        }}
+        onPinThread={(id) => {
+          const now = Date.now();
+          const target = threadsRef.current.find((t) => t.id === id);
           setThreads((prev) =>
             prev
-              .map((t) => (t.id === id ? { ...t, pinned: !t.pinned } : t))
+              .map((t) => (t.id === id ? { ...t, pinned: !t.pinned, updatedAt: now } : t))
               .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt)
-          )
-        }
+          );
+          if (
+            target &&
+            userProfile?.email &&
+            (userProfile.sessionToken || userProfile.provider === 'wordpress')
+          ) {
+            void saveUserThreadRemote(
+              { ...target, pinned: !target.pinned, updatedAt: now },
+              userProfile.sessionToken,
+              settings.proxyUrl
+            );
+          }
+        }}
         onDeleteThread={(id) => {
           setThreads((prev) => prev.filter((t) => t.id !== id));
           if (activeThreadId === id) setActiveThreadId(null);
+          if (userProfile?.email && (userProfile.sessionToken || userProfile.provider === 'wordpress')) {
+            void deleteUserThreadRemote(
+              { threadId: id },
+              userProfile.sessionToken,
+              settings.proxyUrl
+            );
+          }
         }}
         onOpenKnowledge={() => {
           setDrawerTab('archive');
@@ -785,10 +957,7 @@ export default function App() {
         onOpenHelp={() => setAccountInfoMode('help')}
         onOpenAbout={() => setAccountInfoMode('about')}
         onOpenSignIn={() => handleRequireSignIn()}
-        onSignOut={() => {
-          setUserProfile(null);
-          setPendingEngineAfterAuth(null);
-        }}
+        onSignOut={handleSignOut}
       />
 
       <div className="main-pane">
@@ -798,6 +967,14 @@ export default function App() {
           isTemporaryChat={isTemporaryChat}
           canExport={hasMessages}
           knowledgeOpen={knowledgeOpen}
+          isAuthenticated={isAuthenticated}
+          hasMessages={hasMessages}
+          onOpenSignIn={() =>
+            handleRequireSignIn(
+              undefined,
+              'Sign in or create a free account to save conversations to your account.'
+            )
+          }
           onOpenSidebar={() => setSidebarOpen(true)}
           onToggleTheme={handleToggleTheme}
           onToggleTemporary={() => {
@@ -971,10 +1148,7 @@ export default function App() {
           }
           setSignInNotice('');
         }}
-        onSignOut={() => {
-          setUserProfile(null);
-          setPendingEngineAfterAuth(null);
-        }}
+        onSignOut={handleSignOut}
       />
 
       <AccountInfoModal

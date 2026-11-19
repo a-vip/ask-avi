@@ -87,6 +87,14 @@ function ask_avi_is_request_admin(?array $reqUser): bool {
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
   $action = $_GET['action'] ?? '';
 
+  if ($action === 'list_threads') {
+    if (!$reqUser || empty($reqUser['email'])) {
+      ask_avi_send_json(401, ['ok' => false, 'error' => 'Sign in required to load saved conversations.']);
+    }
+    $threads = ask_avi_list_user_threads((string) $reqUser['email']);
+    ask_avi_send_json(200, ['ok' => true, 'threads' => $threads]);
+  }
+
   if ($action === 'live_knowledge') {
     $forceRefresh = !empty($_GET['refresh']);
     $live = function_exists('ask_avi_get_live_wp_knowledge')
@@ -661,6 +669,41 @@ if ($action === 'telemetry') {
     'status_code' => isset($body['statusCode']) ? (int) $body['statusCode'] : null,
     'message' => (string) ($body['message'] ?? 'Client diagnostic event'),
   ]);
+  ask_avi_send_json(200, ['ok' => true]);
+}
+
+if ($action === 'sync_threads') {
+  if (!$reqUser || empty($reqUser['email'])) {
+    ask_avi_send_json(401, ['ok' => false, 'error' => 'Sign in required to sync conversations.']);
+  }
+  $email = (string) $reqUser['email'];
+  ask_avi_backfill_threads_from_qa_logs($email);
+  if (!empty($body['threads']) && is_array($body['threads'])) {
+    ask_avi_upsert_user_threads($email, $body['threads']);
+  }
+  $threads = ask_avi_list_user_threads($email);
+  ask_avi_send_json(200, ['ok' => true, 'threads' => $threads]);
+}
+
+if ($action === 'save_thread') {
+  if (!$reqUser || empty($reqUser['email'])) {
+    ask_avi_send_json(401, ['ok' => false, 'error' => 'Sign in required to save conversation.']);
+  }
+  if (!empty($body['thread']) && is_array($body['thread'])) {
+    ask_avi_upsert_user_threads((string) $reqUser['email'], [$body['thread']]);
+  }
+  ask_avi_send_json(200, ['ok' => true]);
+}
+
+if ($action === 'delete_thread') {
+  if (!$reqUser || empty($reqUser['email'])) {
+    ask_avi_send_json(401, ['ok' => false, 'error' => 'Sign in required to delete conversation.']);
+  }
+  ask_avi_delete_user_thread(
+    (string) $reqUser['email'],
+    (string) ($body['threadId'] ?? ''),
+    !empty($body['clearAll'])
+  );
   ask_avi_send_json(200, ['ok' => true]);
 }
 

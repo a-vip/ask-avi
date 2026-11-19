@@ -1,4 +1,4 @@
-import { BookOpen, Download, EyeOff, Moon, PanelLeft, Sun } from 'lucide-react';
+import { BookOpen, Download, EyeOff, LogIn, Moon, PanelLeft, Sun } from 'lucide-react';
 import type { ThemeMode } from '../types/chat';
 
 interface TopBarProps {
@@ -7,6 +7,9 @@ interface TopBarProps {
   isTemporaryChat: boolean;
   canExport: boolean;
   knowledgeOpen: boolean;
+  isAuthenticated?: boolean;
+  hasMessages?: boolean;
+  onOpenSignIn?: () => void;
   onOpenSidebar: () => void;
   onToggleTheme: () => void;
   onToggleTemporary: () => void;
@@ -20,6 +23,9 @@ export function TopBar({
   isTemporaryChat,
   canExport,
   knowledgeOpen,
+  isAuthenticated = false,
+  hasMessages = false,
+  onOpenSignIn,
   onOpenSidebar,
   onToggleTheme,
   onToggleTemporary,
@@ -50,6 +56,22 @@ export function TopBar({
       </div>
 
       <div className="topbar-right">
+        {!isAuthenticated && onOpenSignIn && (
+          <button
+            type="button"
+            className="topbar-signin-save-btn"
+            onClick={onOpenSignIn}
+            title={
+              hasMessages
+                ? 'Sign in to save this conversation to your account'
+                : 'Sign in or create a free account to save chats'
+            }
+          >
+            <LogIn size={14} />
+            <span>{hasMessages ? 'Sign in to save chat' : 'Sign in'}</span>
+          </button>
+        )}
+
         <button
           type="button"
           className={`icon-btn ${isTemporaryChat ? 'active-pill' : ''}`}

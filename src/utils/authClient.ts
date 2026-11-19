@@ -1,5 +1,5 @@
 import { resolveEffectiveProxyUrl } from '../engine/llmService';
-import type { UserProfile } from '../types/chat';
+import type { ChatThread, UserProfile } from '../types/chat';
 
 export const ADMIN_EMAIL = 'workwithavip@gmail.com';
 
@@ -363,6 +363,91 @@ export async function subscribeToDispatch(
     throw new Error(data.error || `Subscription failed (${res.status}).`);
   }
   return { ok: true, email: data.email || email.trim() };
+}
+
+export async function syncUserThreads(
+  localThreads: ChatThread[],
+  sessionToken?: string,
+  customProxyUrl?: string
+): Promise<ChatThread[] | null> {
+  const authUrl = resolveEffectiveAuthUrl(customProxyUrl);
+  if (!authUrl) return null;
+  try {
+    const res = await fetch(authUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+      },
+      body: JSON.stringify({
+        action: 'sync_threads',
+        threads: localThreads.slice(0, 60),
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await parseAuthJson<{ threads?: ChatThread[] }>(res);
+    if (!data.ok || !Array.isArray(data.threads)) return null;
+    return data.threads;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveUserThreadRemote(
+  thread: ChatThread,
+  sessionToken?: string,
+  customProxyUrl?: string
+): Promise<boolean> {
+  const authUrl = resolveEffectiveAuthUrl(customProxyUrl);
+  if (!authUrl) return false;
+  try {
+    const res = await fetch(authUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+      },
+      body: JSON.stringify({
+        action: 'save_thread',
+        thread,
+      }),
+    });
+    if (!res.ok) return false;
+    const data = await parseAuthJson<{ ok?: boolean }>(res);
+    return Boolean(data.ok);
+  } catch {
+    return false;
+  }
+}
+
+export async function deleteUserThreadRemote(
+  params: { threadId?: string; clearAll?: boolean },
+  sessionToken?: string,
+  customProxyUrl?: string
+): Promise<boolean> {
+  const authUrl = resolveEffectiveAuthUrl(customProxyUrl);
+  if (!authUrl) return false;
+  try {
+    const res = await fetch(authUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+      },
+      body: JSON.stringify({
+        action: 'delete_thread',
+        ...params,
+      }),
+    });
+    if (!res.ok) return false;
+    const data = await parseAuthJson<{ ok?: boolean }>(res);
+    return Boolean(data.ok);
+  } catch {
+    return false;
+  }
 }
 
 let googleScriptPromise: Promise<void> | null = null;

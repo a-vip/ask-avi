@@ -410,7 +410,9 @@ export function SettingsModal({
                     <h3>Conversation History</h3>
                   </div>
                   <p className="settings-desc">
-                    Conversations are saved locally in this browser. Export a backup or clear saved threads at any time.
+                    {userProfile
+                      ? 'Your conversations are synced to your Ask Avi account so you can reopen them after signing out or across devices.'
+                      : 'Guest conversations are only kept temporarily for this session. Sign in or create a free account to save and reopen your chats anytime.'}
                   </p>
                   <div className="modal-actions-row">
                     {onExportAllThreads && (

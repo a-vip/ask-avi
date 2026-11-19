@@ -2,6 +2,7 @@ import {
   BookOpen,
   ChevronDown,
   ChevronRight,
+  CloudCheck,
   ExternalLink,
   HelpCircle,
   Info,
@@ -13,6 +14,7 @@ import {
   Pencil,
   Pin,
   Plus,
+  RefreshCw,
   Search,
   Settings,
   Sun,
@@ -32,6 +34,7 @@ interface SidebarProps {
   activeThreadId: string | null;
   theme: ThemeMode;
   userProfile: UserProfile | null;
+  isSyncingThreads?: boolean;
   onCloseMobile: () => void;
   onToggleCollapse: () => void;
   onNewChat: () => void;
@@ -55,6 +58,7 @@ export function Sidebar({
   activeThreadId,
   theme,
   userProfile,
+  isSyncingThreads = false,
   onCloseMobile,
   onToggleCollapse,
   onNewChat,
@@ -188,11 +192,47 @@ export function Sidebar({
         </div>
 
         <div className="thread-list">
+          {!userProfile ? (
+            <div className="sidebar-save-card">
+              <div className="sidebar-save-title">Save your chat history</div>
+              <p className="sidebar-save-copy">
+                Sign in or create a free account to save conversations to your account and reopen them anytime.
+              </p>
+              <button
+                type="button"
+                className="sidebar-save-btn"
+                onClick={() => {
+                  onOpenSignIn();
+                  if (isMobile) onCloseMobile();
+                }}
+              >
+                <LogIn size={13} />
+                <span>Sign in to save chats</span>
+              </button>
+            </div>
+          ) : (
+            <div className="sidebar-sync-status">
+              {isSyncingThreads ? (
+                <>
+                  <RefreshCw size={12} className="spin-icon" />
+                  <span>Syncing with account…</span>
+                </>
+              ) : (
+                <>
+                  <CloudCheck size={12} />
+                  <span>Saved to your account</span>
+                </>
+              )}
+            </div>
+          )}
+
           {groups.length === 0 ? (
             <div className="thread-empty">
               {searchQuery
                 ? 'No matching conversations.'
-                : 'Your conversations are saved privately in this browser.'}
+                : userProfile
+                  ? 'Conversations you start are automatically saved to your account.'
+                  : 'Your temporary guest session is active.'}
             </div>
           ) : (
             groups.map((group) => (

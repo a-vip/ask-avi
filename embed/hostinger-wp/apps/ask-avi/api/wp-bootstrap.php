@@ -8,7 +8,7 @@ declare(strict_types=1);
 define('ASK_AVI_ADMIN_EMAIL', 'workwithavip@gmail.com');
 define('ASK_AVI_OPTION_KEY', 'ask_avi_settings');
 define('ASK_AVI_SECRET_OPTION', 'ask_avi_auth_secret');
-define('ASK_AVI_SCHEMA_VER', '2');
+define('ASK_AVI_SCHEMA_VER', '3');
 define('ASK_AVI_TOKEN_TTL', 30 * 24 * 60 * 60);
 
 /**
@@ -197,11 +197,13 @@ function ask_avi_ensure_tables(): void {
   $users_table = $wpdb->prefix . 'ask_avi_users';
   $logs_table = $wpdb->prefix . 'ask_avi_logs';
   $qa_table = $wpdb->prefix . 'ask_avi_qa_logs';
+  $threads_table = $wpdb->prefix . 'ask_avi_threads';
   $hasUsers = ($wpdb->get_var("SHOW TABLES LIKE '{$users_table}'") === $users_table);
   $hasLogs = ($wpdb->get_var("SHOW TABLES LIKE '{$logs_table}'") === $logs_table);
   $hasQa = ($wpdb->get_var("SHOW TABLES LIKE '{$qa_table}'") === $qa_table);
+  $hasThreads = ($wpdb->get_var("SHOW TABLES LIKE '{$threads_table}'") === $threads_table);
 
-  if ($hasUsers && $hasLogs && $hasQa && function_exists('get_option') && get_option('ask_avi_schema_ver') === ASK_AVI_SCHEMA_VER) {
+  if ($hasUsers && $hasLogs && $hasQa && $hasThreads && function_exists('get_option') && get_option('ask_avi_schema_ver') === ASK_AVI_SCHEMA_VER) {
     return;
   }
 
@@ -267,9 +269,25 @@ function ask_avi_ensure_tables(): void {
     KEY user_idx (user_email)
   ) {$charset_collate};";
 
+  $sql_threads = "CREATE TABLE {$threads_table} (
+    row_key varchar(64) NOT NULL,
+    id varchar(64) NOT NULL,
+    user_email varchar(190) NOT NULL,
+    title varchar(255) NOT NULL DEFAULT 'New conversation',
+    pinned tinyint(1) NOT NULL DEFAULT 0,
+    created_at bigint(20) NOT NULL,
+    updated_at bigint(20) NOT NULL,
+    messages_json longtext NOT NULL,
+    deleted tinyint(1) NOT NULL DEFAULT 0,
+    PRIMARY KEY  (row_key),
+    KEY user_idx (user_email),
+    KEY updated_idx (updated_at)
+  ) {$charset_collate};";
+
   dbDelta($sql_users);
   dbDelta($sql_logs);
   dbDelta($sql_qa);
+  dbDelta($sql_threads);
   if (function_exists('update_option')) {
     update_option('ask_avi_schema_ver', ASK_AVI_SCHEMA_VER, false);
   }
@@ -714,6 +732,376 @@ function ask_avi_get_live_wp_knowledge(bool $forceRebuild = false): array {
     update_option($cacheKey, $payload, false);
   }
   return $payload;
+}
+
+function ask_avi_thread_row_key(string $userEmail, string $threadId): string {
+  return substr(hash('sha256', strtolower(trim($userEmail)) . ':' . trim($threadId)), 0, 48);
+}
+
+function ask_avi_sanitize_thread_id(string $rawId): string {
+  return substr((string) (preg_replace('/[^a-zA-Z0-9_-]/', '', $rawId) ?? ''), 0, 64);
+}
+
+function ask_avi_derive_thread_title_php(string $firstPrompt): string {
+  $cleaned = trim((string) (preg_replace('/\s+/', ' ', $firstPrompt) ?? $firstPrompt));
+  if ($cleaned === '') {
+    return 'New conversation';
+  }
+  $len = function_exists('mb_strlen') ? mb_strlen($cleaned, 'UTF-8') : strlen($cleaned);
+  if ($len <= 54) {
+    return $cleaned;
+  }
+  return rtrim(ask_avi_clip_utf8($cleaned, 51)) . '…';
+}
+
+function ask_avi_clean_thread_messages(array $messages): array {
+  $cleaned = [];
+  foreach ($messages as $m) {
+    if (!is_array($m)) {
+      continue;
+    }
+    $role = (string) ($m['role'] ?? '');
+    if ($role !== 'user' && $role !== 'assistant') {
+      continue;
+    }
+    $msgId = trim((string) ($m['id'] ?? ''));
+    if ($msgId === '') {
+      $msgId = ($role === 'user' ? 'u_' : 'a_') . bin2hex(random_bytes(5));
+    }
+    $item = $m;
+    $item['id'] = substr($msgId, 0, 64);
+    $item['role'] = $role;
+    $item['content'] = (string) ($m['content'] ?? '');
+    $item['createdAt'] = !empty($m['createdAt']) ? (int) $m['createdAt'] : (int) round(microtime(true) * 1000);
+    $item['isThinking'] = false;
+    $item['isStreaming'] = false;
+    $cleaned[] = $item;
+  }
+  return $cleaned;
+}
+
+function ask_avi_backfill_threads_from_qa_logs(string $userEmail): void {
+  global $wpdb;
+  if (!isset($wpdb) || !defined('ABSPATH')) {
+    return;
+  }
+  $email = strtolower(trim($userEmail));
+  if ($email === '' || $email === 'guest') {
+    return;
+  }
+
+  ask_avi_ensure_tables();
+  $threads_table = $wpdb->prefix . 'ask_avi_threads';
+  $qa_table = $wpdb->prefix . 'ask_avi_qa_logs';
+
+  $existingThreadCount = (int) $wpdb->get_var(
+    $wpdb->prepare("SELECT COUNT(*) FROM {$threads_table} WHERE user_email = %s", $email)
+  );
+
+  if ($email === ASK_AVI_ADMIN_EMAIL && $existingThreadCount === 0) {
+    $rows = $wpdb->get_results(
+      $wpdb->prepare(
+        "SELECT id, ts, thread_id, turn_index, model_used, voice_style, prompt_text, answer_text, thoughts_text
+         FROM {$qa_table}
+         WHERE thread_id != '' AND user_email IN (%s, 'guest')
+         ORDER BY turn_index ASC, ts ASC
+         LIMIT 1000",
+        $email
+      ),
+      ARRAY_A
+    ) ?: [];
+  } else {
+    $rows = $wpdb->get_results(
+      $wpdb->prepare(
+        "SELECT id, ts, thread_id, turn_index, model_used, voice_style, prompt_text, answer_text, thoughts_text
+         FROM {$qa_table}
+         WHERE thread_id != '' AND user_email = %s
+         ORDER BY turn_index ASC, ts ASC
+         LIMIT 1000",
+        $email
+      ),
+      ARRAY_A
+    ) ?: [];
+  }
+
+  if (empty($rows)) {
+    return;
+  }
+
+  $grouped = [];
+  foreach ($rows as $row) {
+    $tid = ask_avi_sanitize_thread_id((string) ($row['thread_id'] ?? ''));
+    if ($tid === '') {
+      continue;
+    }
+    if (!isset($grouped[$tid])) {
+      $grouped[$tid] = [];
+    }
+    $grouped[$tid][] = $row;
+  }
+
+  foreach ($grouped as $tid => $turns) {
+    $rowKey = ask_avi_thread_row_key($email, $tid);
+    $exists = $wpdb->get_var(
+      $wpdb->prepare("SELECT row_key FROM {$threads_table} WHERE row_key = %s LIMIT 1", $rowKey)
+    );
+    if ($exists) {
+      continue;
+    }
+
+    $messages = [];
+    $firstTs = 0;
+    $lastTs = 0;
+    $firstPrompt = '';
+
+    foreach ($turns as $turn) {
+      $promptText = trim((string) ($turn['prompt_text'] ?? ''));
+      $answerText = trim((string) ($turn['answer_text'] ?? ''));
+      if ($promptText === '') {
+        continue;
+      }
+      $ts = max(1, (int) ($turn['ts'] ?? round(microtime(true) * 1000)));
+      if ($firstTs === 0 || $ts < $firstTs) {
+        $firstTs = $ts;
+      }
+      if ($ts > $lastTs) {
+        $lastTs = $ts;
+      }
+      if ($firstPrompt === '') {
+        $firstPrompt = $promptText;
+      }
+
+      $turnSuffix = preg_replace('/[^a-zA-Z0-9_-]/', '', (string) ($turn['id'] ?? '')) ?: bin2hex(random_bytes(4));
+      $messages[] = [
+        'id' => substr('u_' . $turnSuffix, 0, 64),
+        'role' => 'user',
+        'content' => $promptText,
+        'createdAt' => max(1, $ts - 1000),
+        'isThinking' => false,
+        'isStreaming' => false,
+      ];
+      $assistantMsg = [
+        'id' => substr('a_' . $turnSuffix, 0, 64),
+        'role' => 'assistant',
+        'content' => $answerText,
+        'createdAt' => $ts,
+        'voiceStyle' => (string) ($turn['voice_style'] ?? 'standard') ?: 'standard',
+        'isThinking' => false,
+        'isStreaming' => false,
+      ];
+      $thoughts = trim((string) ($turn['thoughts_text'] ?? ''));
+      if ($thoughts !== '') {
+        $assistantMsg['thoughts'] = $thoughts;
+      }
+      $modelUsed = trim((string) ($turn['model_used'] ?? ''));
+      if ($modelUsed !== '') {
+        $assistantMsg['modelLabel'] = $modelUsed;
+      }
+      $messages[] = $assistantMsg;
+    }
+
+    if (empty($messages) || $firstPrompt === '') {
+      continue;
+    }
+
+    $wpdb->insert($threads_table, [
+      'row_key' => $rowKey,
+      'id' => $tid,
+      'user_email' => $email,
+      'title' => ask_avi_clip_utf8(ask_avi_derive_thread_title_php($firstPrompt), 255),
+      'pinned' => 0,
+      'created_at' => $firstTs > 0 ? $firstTs : (int) round(microtime(true) * 1000),
+      'updated_at' => $lastTs > 0 ? $lastTs : (int) round(microtime(true) * 1000),
+      'messages_json' => (string) json_encode($messages, JSON_UNESCAPED_UNICODE),
+      'deleted' => 0,
+    ]);
+  }
+}
+
+function ask_avi_upsert_user_threads(string $userEmail, array $threads): int {
+  global $wpdb;
+  if (!isset($wpdb) || !defined('ABSPATH')) {
+    return 0;
+  }
+  $email = strtolower(trim($userEmail));
+  if ($email === '' || $email === 'guest') {
+    return 0;
+  }
+
+  ask_avi_ensure_tables();
+  $threads_table = $wpdb->prefix . 'ask_avi_threads';
+  $nowMs = (int) round(microtime(true) * 1000);
+  $savedCount = 0;
+
+  foreach (array_slice($threads, 0, 60) as $thread) {
+    if (!is_array($thread)) {
+      continue;
+    }
+    $threadId = ask_avi_sanitize_thread_id((string) ($thread['id'] ?? ''));
+    if ($threadId === '') {
+      continue;
+    }
+    $rawMsgs = is_array($thread['messages'] ?? null) ? $thread['messages'] : [];
+    $cleanMsgs = ask_avi_clean_thread_messages($rawMsgs);
+    if (empty($cleanMsgs)) {
+      continue;
+    }
+
+    $title = ask_avi_clip_utf8(trim((string) ($thread['title'] ?? '')) ?: 'New conversation', 255);
+    $pinned = !empty($thread['pinned']) ? 1 : 0;
+    $createdAt = !empty($thread['createdAt']) ? (int) $thread['createdAt'] : $nowMs;
+    $updatedAt = !empty($thread['updatedAt']) ? (int) $thread['updatedAt'] : $nowMs;
+    $rowKey = ask_avi_thread_row_key($email, $threadId);
+
+    $existing = $wpdb->get_row(
+      $wpdb->prepare("SELECT row_key, updated_at, deleted, messages_json FROM {$threads_table} WHERE row_key = %s", $rowKey),
+      ARRAY_A
+    );
+
+    if ($existing) {
+      if (!empty($existing['deleted']) && $updatedAt <= (int) $existing['updated_at']) {
+        continue;
+      }
+      if (empty($existing['deleted'])) {
+        $existingMsgs = json_decode((string) ($existing['messages_json'] ?? '[]'), true);
+        $existingCount = is_array($existingMsgs) ? count($existingMsgs) : 0;
+        if ($existingCount > count($cleanMsgs) && (int) $existing['updated_at'] > $updatedAt) {
+          continue;
+        }
+      }
+      $wpdb->update(
+        $threads_table,
+        [
+          'title' => $title,
+          'pinned' => $pinned,
+          'updated_at' => $updatedAt,
+          'messages_json' => (string) json_encode($cleanMsgs, JSON_UNESCAPED_UNICODE),
+          'deleted' => 0,
+        ],
+        ['row_key' => $rowKey]
+      );
+    } else {
+      $wpdb->insert($threads_table, [
+        'row_key' => $rowKey,
+        'id' => $threadId,
+        'user_email' => $email,
+        'title' => $title,
+        'pinned' => $pinned,
+        'created_at' => $createdAt,
+        'updated_at' => $updatedAt,
+        'messages_json' => (string) json_encode($cleanMsgs, JSON_UNESCAPED_UNICODE),
+        'deleted' => 0,
+      ]);
+    }
+    $savedCount += 1;
+  }
+
+  return $savedCount;
+}
+
+function ask_avi_list_user_threads(string $userEmail, int $limit = 60): array {
+  global $wpdb;
+  if (!isset($wpdb) || !defined('ABSPATH')) {
+    return [];
+  }
+  $email = strtolower(trim($userEmail));
+  if ($email === '' || $email === 'guest') {
+    return [];
+  }
+
+  ask_avi_ensure_tables();
+  ask_avi_backfill_threads_from_qa_logs($email);
+  $threads_table = $wpdb->prefix . 'ask_avi_threads';
+  $safeLimit = max(1, min(100, $limit));
+
+  $rows = $wpdb->get_results(
+    $wpdb->prepare(
+      "SELECT id, title, pinned, created_at, updated_at, messages_json
+       FROM {$threads_table}
+       WHERE user_email = %s AND deleted = 0
+       ORDER BY pinned DESC, updated_at DESC
+       LIMIT %d",
+      $email,
+      $safeLimit
+    ),
+    ARRAY_A
+  ) ?: [];
+
+  $out = [];
+  foreach ($rows as $row) {
+    $decoded = json_decode((string) ($row['messages_json'] ?? '[]'), true);
+    $messages = is_array($decoded) ? ask_avi_clean_thread_messages($decoded) : [];
+    $out[] = [
+      'id' => (string) $row['id'],
+      'title' => (string) $row['title'],
+      'pinned' => !empty($row['pinned']),
+      'createdAt' => (int) $row['created_at'],
+      'updatedAt' => (int) $row['updated_at'],
+      'messages' => $messages,
+    ];
+  }
+  return $out;
+}
+
+function ask_avi_delete_user_thread(string $userEmail, string $threadId = '', bool $clearAll = false): void {
+  global $wpdb;
+  if (!isset($wpdb) || !defined('ABSPATH')) {
+    return;
+  }
+  $email = strtolower(trim($userEmail));
+  if ($email === '' || $email === 'guest') {
+    return;
+  }
+
+  ask_avi_ensure_tables();
+  $threads_table = $wpdb->prefix . 'ask_avi_threads';
+  $nowMs = (int) round(microtime(true) * 1000);
+
+  if ($clearAll) {
+    ask_avi_backfill_threads_from_qa_logs($email);
+    $wpdb->update(
+      $threads_table,
+      [
+        'deleted' => 1,
+        'updated_at' => $nowMs,
+        'messages_json' => '[]',
+      ],
+      ['user_email' => $email]
+    );
+    return;
+  }
+
+  $cleanId = ask_avi_sanitize_thread_id($threadId);
+  if ($cleanId === '') {
+    return;
+  }
+  $rowKey = ask_avi_thread_row_key($email, $cleanId);
+  $exists = $wpdb->get_var(
+    $wpdb->prepare("SELECT row_key FROM {$threads_table} WHERE row_key = %s LIMIT 1", $rowKey)
+  );
+  if ($exists) {
+    $wpdb->update(
+      $threads_table,
+      [
+        'deleted' => 1,
+        'updated_at' => $nowMs,
+        'messages_json' => '[]',
+      ],
+      ['row_key' => $rowKey]
+    );
+  } else {
+    $wpdb->insert($threads_table, [
+      'row_key' => $rowKey,
+      'id' => $cleanId,
+      'user_email' => $email,
+      'title' => 'Deleted conversation',
+      'pinned' => 0,
+      'created_at' => $nowMs,
+      'updated_at' => $nowMs,
+      'messages_json' => '[]',
+      'deleted' => 1,
+    ]);
+  }
 }
 
 function ask_avi_send_json(int $status, array $payload): void {

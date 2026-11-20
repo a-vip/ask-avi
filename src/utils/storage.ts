@@ -1,4 +1,4 @@
-import type { AppSettings, ChatThread, ThemeMode, UserProfile } from '../types/chat';
+import type { AppSettings, ChatThread, ThemeMode, ThinkingEffort, UserProfile } from '../types/chat';
 
 const THREADS_KEY = 'ask_avi_threads_v1';
 const GUEST_THREADS_KEY = 'ask_avi_guest_threads_v1';
@@ -10,7 +10,7 @@ const PROFILE_KEY = 'ask_avi_profile_v1';
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
   engineId: 'oss-reasoning',
-  voiceStyle: 'standard',
+  thinkingEffort: 'fast',
   webSearchEnabled: true,
   groqApiKey: '',
   openRouterApiKey: '',
@@ -220,10 +220,18 @@ export function loadSettings(): AppSettings {
           ? 'custom-api'
           : DEFAULT_SETTINGS.engineId;
 
+    const resolvedEffort: ThinkingEffort =
+      stored.thinkingEffort === 'fast' ||
+      stored.thinkingEffort === 'medium' ||
+      stored.thinkingEffort === 'deep'
+        ? stored.thinkingEffort
+        : 'fast';
+
     return {
       ...DEFAULT_SETTINGS,
       ...stored,
       engineId: resolvedEngineId,
+      thinkingEffort: resolvedEffort,
       theme: resolvedTheme,
       customApi: {
         ...DEFAULT_SETTINGS.customApi,

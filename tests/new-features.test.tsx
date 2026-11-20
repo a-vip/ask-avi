@@ -5,16 +5,20 @@ import { createRoot, type Root } from 'react-dom/client';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+import { Composer } from '../src/components/Composer';
 import { KnowledgeDrawer, JUST_PUBLISHED_FILTER } from '../src/components/KnowledgeDrawer';
 import { MessageBubble } from '../src/components/MessageBubble';
 import { Sidebar } from '../src/components/Sidebar';
 import { TopBar } from '../src/components/TopBar';
 import { WelcomeScreen } from '../src/components/WelcomeScreen';
 import { getEligibleGreetings, resolveVisitorSignals } from '../src/data/greetings';
+import { buildAviSystemPrompt } from '../src/data/persona';
 import { buildFinalContinuityBrief, classifyQueryComplexity } from '../src/engine/deliberation';
+import { llmService } from '../src/engine/llmService';
 import { knowledgeIndex } from '../src/engine/rag';
 import type { ChatMessage, ChatThread } from '../src/types/chat';
-import { loadThreads, mergeThreadLists, saveThreads } from '../src/utils/storage';
+import { DEFAULT_SETTINGS, loadSettings, loadThreads, mergeThreadLists, saveThreads } from '../src/utils/storage';
+import { sanitizeThinkingTrace } from '../src/utils/thinking';
 
 describe('Ask Avi v20261119a feature suite', () => {
   const roots: Array<{ root: Root; container: HTMLDivElement }> = [];
@@ -76,8 +80,8 @@ describe('Ask Avi v20261119a feature suite', () => {
         onSelectEngine={vi.fn()}
         onToggleWebSearch={vi.fn()}
         onOpenSettings={vi.fn()}
-        voiceStyle="standard"
-        onChangeVoiceStyle={vi.fn()}
+        thinkingEffort="fast"
+        onChangeThinkingEffort={vi.fn()}
         onOpenDossierPicker={vi.fn()}
         inputRef={{ current: null }}
       />
@@ -199,26 +203,26 @@ describe('Ask Avi v20261119a feature suite', () => {
     );
   });
 
-  it('enforces tone-scoped humour suppression in serious registers and high-stakes legal/IHL queries', () => {
-    const academicSignals = resolveVisitorSignals({
+  it('enforces tone-scoped humour suppression in Deep Reasoning and high-stakes legal/IHL queries', () => {
+    const deepSignals = resolveVisitorSignals({
       now: new Date(2026, 10, 20, 2, 15, 0),
       timeZone: 'Europe/London',
-      voiceStyle: 'academic',
+      thinkingEffort: 'deep',
       skipVisitTracking: true,
     });
-    const academicIds = getEligibleGreetings(academicSignals).map((g) => g.id);
-    expect(academicIds).not.toContain('wee-sleep-or-hubris');
-    expect(academicIds).not.toContain('land-friday-escape');
-    expect(academicIds).not.toContain('wit-spinoza-to-python');
+    const deepIds = getEligibleGreetings(deepSignals).map((g) => g.id);
+    expect(deepIds).not.toContain('wee-sleep-or-hubris');
+    expect(deepIds).not.toContain('land-friday-escape');
+    expect(deepIds).not.toContain('wit-spinoza-to-python');
 
-    const standardSignals = resolveVisitorSignals({
+    const fastSignals = resolveVisitorSignals({
       now: new Date(2026, 10, 20, 2, 15, 0),
       timeZone: 'Europe/London',
-      voiceStyle: 'standard',
+      thinkingEffort: 'fast',
       skipVisitTracking: true,
     });
-    const standardIds = getEligibleGreetings(standardSignals).map((g) => g.id);
-    expect(standardIds).toContain('wee-sleep-or-hubris');
+    const fastIds = getEligibleGreetings(fastSignals).map((g) => g.id);
+    expect(fastIds).toContain('wee-sleep-or-hubris');
 
     const brief = buildFinalContinuityBrief({
       plan: {
@@ -233,10 +237,12 @@ describe('Ask Avi v20261119a feature suite', () => {
       round2Analysis: '',
       round3Critique: '',
       hasCandidates: false,
-      voiceStyle: 'standard',
+      thinkingEffort: 'fast',
       query: 'How does Article 36 govern lethal autonomous targeting?',
     });
     expect(brief.continuityBrief).toContain('REGISTER GUARDRAIL');
+    expect(brief.continuityBrief).toContain('international lawyer');
+    expect(brief.continuityBrief).toContain("I'm not a lawyer");
   });
 
   it('shows Contextual Dispatch Opt-In card when a response detects a content gap or reaches turn 2+', () => {
@@ -426,5 +432,135 @@ describe('Ask Avi v20261119a feature suite', () => {
     expect(cssText).toContain('color-scheme: light;');
     expect(cssText).toContain('::-webkit-scrollbar-button');
     expect(cssText).toContain('.ag-thinking-body.live-scroll::-webkit-scrollbar');
+  });
+
+  it('defaults to Fast thinking effort, exposes Fast/Medium/Deep Reasoning options, and offers Go deeper upgrade on fast replies', async () => {
+    expect(DEFAULT_SETTINGS.thinkingEffort).toBe('fast');
+    localStorage.setItem('ask_avi_settings_v4', JSON.stringify({ voiceStyle: 'standard', theme: 'dark' }));
+    expect(loadSettings().thinkingEffort).toBe('fast');
+
+    const fallbackFast = buildAviSystemPrompt('fast', [], '', false);
+    expect(fallbackFast).toContain('international lawyer');
+    expect(fallbackFast).toContain('2 to 4 tight paragraphs');
+    expect(fallbackFast).toContain('NEVER say "I\'m not a lawyer"');
+
+    const cleaned = sanitizeThinkingTrace(
+      'I will present myself as a hardworking, diligent polymath and avoid underplaying him as a developer. Never say I\'m not a lawyer. Focusing on Article 36 accountability architecture.',
+      true
+    );
+    expect(cleaned).not.toMatch(/polymath|diligent|hardworking|underplaying|not a lawyer/i);
+    expect(cleaned).toContain('Article 36 accountability architecture');
+
+    const onChangeEffort = vi.fn();
+    const composer = mount(
+      <Composer
+        value=""
+        onChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onStop={vi.fn()}
+        isStreaming={false}
+        engineId="oss-reasoning"
+        webSearchEnabled={false}
+        onSelectEngine={vi.fn()}
+        onToggleWebSearch={vi.fn()}
+        onOpenSettings={vi.fn()}
+        thinkingEffort="fast"
+        onChangeThinkingEffort={onChangeEffort}
+        onOpenDossierPicker={vi.fn()}
+        centered
+      />
+    );
+    expect(composer.textContent).not.toContain('Response Voice');
+    expect(composer.querySelector('.effort-chip-btn')?.textContent).toContain('Fast');
+    expect(composer.querySelector('.effort-hint-line')?.textContent).toContain('Fast answers on');
+
+    act(() => {
+      composer.querySelector<HTMLButtonElement>('.effort-chip-btn')?.click();
+    });
+    const popoverText = composer.querySelector('.style-popover')?.textContent ?? '';
+    expect(popoverText).toContain('Thinking Effort');
+    expect(popoverText).toContain('Fast');
+    expect(popoverText).toContain('Medium');
+    expect(popoverText).toContain('Deep Reasoning');
+
+    const mediumOpt = Array.from(composer.querySelectorAll<HTMLButtonElement>('.style-popover .popover-item')).find(
+      (b) => b.textContent?.includes('Medium')
+    );
+    act(() => {
+      mediumOpt?.click();
+    });
+    expect(onChangeEffort).toHaveBeenCalledWith('medium');
+
+    const onRegenerate = vi.fn();
+    const fastBubble = mount(
+      <MessageBubble
+        message={{
+          id: 'a-fast-1',
+          role: 'assistant',
+          content: 'Concise legal analysis.',
+          createdAt: Date.now(),
+          thinkingEffort: 'fast',
+          complexityTier: 'deep-deliberative',
+          isStreaming: false,
+        }}
+        isLastAssistant={true}
+        onEditUserMessage={vi.fn()}
+        onRegenerate={onRegenerate}
+        onFollowUpClick={vi.fn()}
+        onInspectSource={vi.fn()}
+        onFeedback={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+    const deeperBtn = fastBubble.querySelector<HTMLButtonElement>('.msg-deeper-btn');
+    expect(deeperBtn).not.toBeNull();
+    act(() => {
+      deeperBtn?.click();
+    });
+    expect(onRegenerate).toHaveBeenCalledWith('a-fast-1', 'deep');
+
+    // Verify fast effort skips intermediate deliberate calls and sends low reasoningEffort + 1600 maxTokens
+    const fetchPayloads: Array<{ phase?: string; thinkingEffort?: string; reasoningEffort?: string; maxTokens?: number }> = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as {
+        phase?: string;
+        thinkingEffort?: string;
+        reasoningEffort?: string;
+        maxTokens?: number;
+      };
+      fetchPayloads.push(body);
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: 'Concise reply.' } }] })}\n\n`));
+          c.enqueue(encoder.encode('data: [DONE]\n\n'));
+          c.close();
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream', 'X-Ask-Avi-Protocol': 'openai' },
+      });
+    });
+
+    const fastResult = await llmService.generateReply({
+      query: 'Where does legal accountability sit in autonomous AI failures?',
+      history: [],
+      engineId: 'oss-reasoning',
+      thinkingEffort: 'fast',
+      webSearchEnabled: false,
+      proxyUrl: 'https://proxy.test/api/chat',
+      onUpdate: vi.fn(),
+    });
+    fetchSpy.mockRestore();
+
+    expect(fastResult.thinkingEffort).toBe('fast');
+    expect(fetchPayloads.filter((p) => p.phase === 'deliberate')).toHaveLength(0);
+    expect(fetchPayloads[0]).toMatchObject({
+      phase: 'final',
+      thinkingEffort: 'fast',
+      reasoningEffort: 'low',
+      maxTokens: 1600,
+    });
   });
 });

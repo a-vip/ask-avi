@@ -151,6 +151,17 @@ describe('App Multi-Turn Conversation Flow', () => {
 
     const getFinalCalls = () => chatPayloads.filter((p) => (p.phase ?? 'final') === 'final');
 
+    // Default initial thinking effort is Fast with a concise reminder to upgrade
+    expect(container.querySelector('.effort-chip-btn')?.textContent).toContain('Fast');
+    const deepHintBtn = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('.effort-hint-link')
+    ).find((b) => b.textContent?.includes('Deep Reasoning'));
+    expect(deepHintBtn).toBeDefined();
+    await act(async () => {
+      deepHintBtn!.click();
+    });
+    expect(container.querySelector('.effort-chip-btn')?.textContent).toContain('Deep Reasoning');
+
     // Turn 1 via WelcomeScreen textarea + button click
     const textarea1 = container.querySelector('textarea')!;
     await act(async () => {

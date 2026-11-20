@@ -6,7 +6,7 @@ import {
   type SelectedGreeting,
 } from '../data/greetings';
 import { STARTER_PROMPTS, VERIFIED_LINKS } from '../data/persona';
-import type { AttachedContext, EngineId, ThemeMode, VoiceStyle } from '../types/chat';
+import type { AttachedContext, EngineId, ThemeMode, ThinkingEffort } from '../types/chat';
 import { AviAvatar } from './AviAvatar';
 import { Composer } from './Composer';
 
@@ -21,8 +21,8 @@ interface WelcomeScreenProps {
   onSelectEngine: (id: EngineId) => void;
   onToggleWebSearch: () => void;
   onOpenSettings: () => void;
-  voiceStyle: VoiceStyle;
-  onChangeVoiceStyle: (style: VoiceStyle) => void;
+  thinkingEffort: ThinkingEffort;
+  onChangeThinkingEffort: (effort: ThinkingEffort) => void;
   attachedContext?: AttachedContext | null;
   onAttachContext?: (ctx: AttachedContext | null) => void;
   attachedContexts?: AttachedContext[];
@@ -52,8 +52,8 @@ export function WelcomeScreen({
   onSelectEngine,
   onToggleWebSearch,
   onOpenSettings,
-  voiceStyle,
-  onChangeVoiceStyle,
+  thinkingEffort,
+  onChangeThinkingEffort,
   attachedContext = null,
   onAttachContext,
   attachedContexts,
@@ -77,11 +77,11 @@ export function WelcomeScreen({
       userName,
       isAuthenticated,
       threadCount,
-      voiceStyle,
+      thinkingEffort,
       engineId,
       theme,
     }),
-    [userName, isAuthenticated, threadCount, voiceStyle, engineId, theme]
+    [userName, isAuthenticated, threadCount, thinkingEffort, engineId, theme]
   );
 
   const [greeting, setGreeting] = useState<SelectedGreeting>(() => selectDynamicGreeting(visitorInput));
@@ -98,7 +98,7 @@ export function WelcomeScreen({
         excludeIds: [prev.id],
       })
     );
-  }, [userName, voiceStyle, threadCount]);
+  }, [userName, thinkingEffort, threadCount]);
 
   const visiblePrompts = useMemo(() => {
     if (selectedCategory === 'All') return STARTER_PROMPTS;
@@ -132,8 +132,8 @@ export function WelcomeScreen({
           onSelectEngine={onSelectEngine}
           onToggleWebSearch={onToggleWebSearch}
           onOpenSettings={onOpenSettings}
-          voiceStyle={voiceStyle}
-          onChangeVoiceStyle={onChangeVoiceStyle}
+          thinkingEffort={thinkingEffort}
+          onChangeThinkingEffort={onChangeThinkingEffort}
           attachedContext={attachedContext}
           onAttachContext={onAttachContext}
           attachedContexts={attachedContexts}

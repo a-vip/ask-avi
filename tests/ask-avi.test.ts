@@ -501,21 +501,32 @@ describe('Thread Storage & Export Helpers', () => {
   });
 
   it('assembles accurate biography & philosophy in backend Master Prompt and supports WP Admin overrides', () => {
+    expect(DEFAULT_SERVER_MASTER_PROMPT).toContain('international lawyer');
+    expect(DEFAULT_SERVER_MASTER_PROMPT).toContain('AI policy');
     expect(DEFAULT_SERVER_MASTER_PROMPT).toContain('Open University');
     expect(DEFAULT_SERVER_MASTER_PROMPT).toContain('University of Essex');
     expect(DEFAULT_SERVER_MASTER_PROMPT).toContain('Imperial College London');
     expect(DEFAULT_SERVER_MASTER_PROMPT).toContain('First Class Law LLB');
     expect(DEFAULT_SERVER_MASTER_PROMPT).toContain('University of Cambridge');
-    expect(DEFAULT_SERVER_MASTER_PROMPT).toContain('philosophy, computer science, neuroscience');
+    expect(DEFAULT_SERVER_MASTER_PROMPT).toContain('mathematics, computation, neuroscience, and philosophy');
+    expect(DEFAULT_SERVER_MASTER_PROMPT).toContain("I'm not a lawyer");
     expect(DEFAULT_SERVER_MASTER_PROMPT).not.toContain('International Studies');
 
     const bio = knowledgeIndex.getAllEntries().find((e) => e.id === 'pillar-bio-identity');
+    expect(bio?.summary.toLowerCase()).toContain('international lawyer');
     expect(bio?.chunks[0]).toContain('Mathematics');
     expect(bio?.chunks[0]).toContain('neuroscience');
     expect(bio?.chunks[0]).not.toContain('International Studies');
 
+    const fastAssembled = assembleServerSystemPrompt({
+      thinkingEffort: 'fast',
+      archiveBlock: '[1] The Global Shell Game — https://aviperera.com/the-global-shell-game/',
+    });
+    expect(fastAssembled).toContain('RESPONSE DEPTH (Fast)');
+    expect(fastAssembled).toContain('2 to 4 crisp paragraphs');
+
     const assembled = assembleServerSystemPrompt({
-      voiceStyle: 'academic',
+      thinkingEffort: 'deep',
       archiveBlock: '[1] The Global Shell Game — https://aviperera.com/the-global-shell-game/',
     });
     expect(assembled).toContain('Open University');
@@ -524,7 +535,7 @@ describe('Thread Storage & Export Helpers', () => {
 
     const overridden = assembleServerSystemPrompt({
       masterPromptOverride: 'Custom backend policy directive.',
-      voiceStyle: 'standard',
+      thinkingEffort: 'fast',
     });
     expect(overridden).toContain('Custom backend policy directive.');
     expect(overridden).not.toContain('Open University');

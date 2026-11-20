@@ -30,8 +30,8 @@ import type {
   EngineId,
   KnowledgeEntry,
   RetrievedSource,
+  ThinkingEffort,
   UserProfile,
-  VoiceStyle,
 } from './types/chat';
 import {
   applyThemeToDocument,
@@ -400,7 +400,8 @@ export default function App() {
       queryText: string,
       assistantMsgId: string,
       overrideEngineId?: EngineId,
-      attached?: AttachedContext[]
+      attached?: AttachedContext[],
+      overrideThinkingEffort?: ThinkingEffort
     ) => {
       const controller = new AbortController();
       abortRef.current = controller;
@@ -408,6 +409,7 @@ export default function App() {
       shouldAutoScrollRef.current = true;
 
       const engineToUse = overrideEngineId ?? settings.engineId;
+      const effortToUse = overrideThinkingEffort ?? settings.thinkingEffort;
       const turnIndex = historyBeforeQuery.filter((m) => m.role === 'user').length + 1;
       const turnId = `turn_${assistantMsgId}`;
 
@@ -416,7 +418,7 @@ export default function App() {
           query: queryText,
           history: historyBeforeQuery,
           engineId: engineToUse,
-          voiceStyle: settings.voiceStyle,
+          thinkingEffort: effortToUse,
           webSearchEnabled: settings.webSearchEnabled,
           turnId,
           threadId,
@@ -468,6 +470,7 @@ export default function App() {
           isContentGap: result.isContentGap,
           gapTopic: result.gapTopic,
           complexityTier: result.complexityTier,
+          thinkingEffort: result.thinkingEffort ?? effortToUse,
           followUps: result.followUps,
           isStreaming: false,
         };
@@ -509,7 +512,7 @@ export default function App() {
                     role: 'assistant',
                     content: result.content,
                     createdAt: finishedAt,
-                    voiceStyle: settings.voiceStyle,
+                    thinkingEffort: effortToUse,
                     ...finalFields,
                   },
                 ],
@@ -549,7 +552,7 @@ export default function App() {
             gapTopic: result.gapTopic,
             engineId: result.engineUsed,
             modelUsed: result.modelLabel,
-            voiceStyle: settings.voiceStyle,
+            voiceStyle: effortToUse,
             latencyMs: result.thinkingMs,
           },
           userProfile?.sessionToken,
@@ -599,7 +602,7 @@ export default function App() {
     },
     [
       settings.engineId,
-      settings.voiceStyle,
+      settings.thinkingEffort,
       settings.webSearchEnabled,
       settings.groqApiKey,
       settings.openRouterApiKey,
@@ -638,7 +641,7 @@ export default function App() {
         role: 'assistant',
         content: '',
         createdAt: Date.now(),
-        voiceStyle: settings.voiceStyle,
+        thinkingEffort: settings.thinkingEffort,
         isThinking: true,
         isStreaming: true,
       };
@@ -689,7 +692,7 @@ export default function App() {
       isStreaming,
       attachedContexts,
       settings.engineId,
-      settings.voiceStyle,
+      settings.thinkingEffort,
       userProfile,
       handleRequireSignIn,
       activeThread,
@@ -737,7 +740,7 @@ export default function App() {
       role: 'assistant',
       content: '',
       createdAt: Date.now(),
-      voiceStyle: settings.voiceStyle,
+      thinkingEffort: settings.thinkingEffort,
       isThinking: true,
       isStreaming: true,
     };
@@ -761,7 +764,10 @@ export default function App() {
     );
   };
 
-  const handleRegenerate = async (assistantMessageId: string) => {
+  const handleRegenerate = async (
+    assistantMessageId: string,
+    overrideEffort?: ThinkingEffort
+  ) => {
     if (!activeThread || isStreaming) return;
     const idx = activeThread.messages.findIndex((m) => m.id === assistantMessageId);
     if (idx <= 0) return;
@@ -775,6 +781,7 @@ export default function App() {
     const userMsg = activeThread.messages[userIdx];
     const historyBefore = activeThread.messages.slice(0, userIdx);
     const newAssistantId = makeId('a');
+    const effortToUse = overrideEffort ?? settings.thinkingEffort;
 
     updateThreadMessages(activeThread.id, (msgs) =>
       msgs.slice(0, idx).concat({
@@ -782,7 +789,7 @@ export default function App() {
         role: 'assistant',
         content: '',
         createdAt: Date.now(),
-        voiceStyle: settings.voiceStyle,
+        thinkingEffort: effortToUse,
         isThinking: true,
         isStreaming: true,
       })
@@ -797,7 +804,8 @@ export default function App() {
       userMsg.content,
       newAssistantId,
       undefined,
-      prevAttachments
+      prevAttachments,
+      effortToUse
     );
   };
 
@@ -1008,9 +1016,9 @@ export default function App() {
               onSelectEngine={handleSelectEngine}
               onToggleWebSearch={handleToggleWebSearch}
               onOpenSettings={() => openSettingsModal('general')}
-              voiceStyle={settings.voiceStyle}
-              onChangeVoiceStyle={(voiceStyle: VoiceStyle) =>
-                setSettings((prev) => ({ ...prev, voiceStyle }))
+              thinkingEffort={settings.thinkingEffort}
+              onChangeThinkingEffort={(thinkingEffort: ThinkingEffort) =>
+                setSettings((prev) => ({ ...prev, thinkingEffort }))
               }
               attachedContexts={attachedContexts}
               onAttachContexts={(items) =>
@@ -1080,9 +1088,9 @@ export default function App() {
               onSelectEngine={handleSelectEngine}
               onToggleWebSearch={handleToggleWebSearch}
               onOpenSettings={() => openSettingsModal('general')}
-              voiceStyle={settings.voiceStyle}
-              onChangeVoiceStyle={(voiceStyle: VoiceStyle) =>
-                setSettings((prev) => ({ ...prev, voiceStyle }))
+              thinkingEffort={settings.thinkingEffort}
+              onChangeThinkingEffort={(thinkingEffort: ThinkingEffort) =>
+                setSettings((prev) => ({ ...prev, thinkingEffort }))
               }
               attachedContexts={attachedContexts}
               onAttachContexts={(items) =>

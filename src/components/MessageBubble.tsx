@@ -23,7 +23,7 @@ import {
   Presentation,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ChatMessage, RetrievedSource } from '../types/chat';
+import type { ChatMessage, RetrievedSource, ThinkingEffort } from '../types/chat';
 import { subscribeToDispatch } from '../utils/authClient';
 import {
   renderMarkdownToSafeHtml,
@@ -57,7 +57,7 @@ interface MessageBubbleProps {
   proxyUrl?: string;
   sessionToken?: string;
   onEditUserMessage: (messageId: string, newContent: string) => void;
-  onRegenerate: (assistantMessageId: string) => void;
+  onRegenerate: (assistantMessageId: string, overrideEffort?: ThinkingEffort) => void;
   onFollowUpClick: (prompt: string) => void;
   onInspectSource: (sources: RetrievedSource[], focusIndex: number) => void;
   onFeedback: (messageId: string, vote: 'up' | 'down' | null) => void;
@@ -714,6 +714,20 @@ export function MessageBubble({
                   <span>{speaking ? 'Stop' : 'Listen'}</span>
                 </button>
               )}
+
+              {isLastAssistant &&
+                message.thinkingEffort === 'fast' &&
+                message.complexityTier !== 'fast-trivial' && (
+                  <button
+                    type="button"
+                    className="msg-action-btn msg-deeper-btn"
+                    onClick={() => onRegenerate(message.id, 'deep')}
+                    title="Re-answer this question with Deep Reasoning for fuller analysis"
+                  >
+                    <Sparkles size={13} />
+                    <span>Go deeper</span>
+                  </button>
+                )}
 
               <div className="msg-vote-group">
                 <button

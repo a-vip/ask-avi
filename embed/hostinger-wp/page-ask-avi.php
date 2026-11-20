@@ -8,7 +8,7 @@ if (!defined('ABSPATH')) {
   exit;
 }
 
-$ask_avi_app_url = get_template_directory_uri() . '/apps/ask-avi/index.html?v=20261119c';
+$ask_avi_app_url = get_template_directory_uri() . '/apps/ask-avi/index.html?v=20261120a';
 ?><!doctype html>
 <html <?php language_attributes(); ?>>
   <head>

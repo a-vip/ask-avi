@@ -183,7 +183,7 @@ describe('Chain-of-Thought & Post-Draft Critique Isolation', () => {
       query: 'How does Spinoza view technology and agency?',
       history: [],
       engineId: 'oss-fast',
-      voiceStyle: 'standard',
+      thinkingEffort: 'fast',
       webSearchEnabled: false,
       proxyUrl: 'https://proxy.test/api/chat',
       onUpdate: (u) => {

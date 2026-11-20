@@ -1,9 +1,11 @@
 import {
   ArrowUp,
   BookOpen,
+  Brain,
   Check,
   ChevronDown,
   FileText,
+  Gauge,
   Globe,
   Link2,
   Loader2,
@@ -16,10 +18,11 @@ import {
   Sparkles,
   Square,
   X,
+  Zap,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { ENGINE_OPTIONS, VOICE_STYLES } from '../data/persona';
-import type { AttachedContext, EngineId, VoiceStyle } from '../types/chat';
+import { ENGINE_OPTIONS, THINKING_EFFORTS } from '../data/persona';
+import type { AttachedContext, EngineId, ThinkingEffort } from '../types/chat';
 import {
   allocateContextBudget,
   extractFileContext,
@@ -39,8 +42,8 @@ interface ComposerProps {
   onSelectEngine: (id: EngineId) => void;
   onToggleWebSearch: () => void;
   onOpenSettings: () => void;
-  voiceStyle: VoiceStyle;
-  onChangeVoiceStyle: (style: VoiceStyle) => void;
+  thinkingEffort: ThinkingEffort;
+  onChangeThinkingEffort: (effort: ThinkingEffort) => void;
   attachedContext?: AttachedContext | null;
   onAttachContext?: (ctx: AttachedContext | null) => void;
   attachedContexts?: AttachedContext[];
@@ -87,8 +90,8 @@ export function Composer({
   onSelectEngine,
   onToggleWebSearch,
   onOpenSettings,
-  voiceStyle,
-  onChangeVoiceStyle,
+  thinkingEffort,
+  onChangeThinkingEffort,
   attachedContext = null,
   onAttachContext,
   attachedContexts,
@@ -148,7 +151,10 @@ export function Composer({
     typeof window !== 'undefined' &&
     ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
 
-  const activeStyle = VOICE_STYLES.find((s) => s.id === voiceStyle) ?? VOICE_STYLES[0];
+  const activeEffort =
+    THINKING_EFFORTS.find((e) => e.id === thinkingEffort) ?? THINKING_EFFORTS[0];
+  const EffortIcon =
+    thinkingEffort === 'deep' ? Brain : thinkingEffort === 'medium' ? Gauge : Zap;
   const activeEngine = ENGINE_OPTIONS.find((o) => o.id === engineId) ?? ENGINE_OPTIONS[0];
 
   // Auto-resize textarea smoothly
@@ -514,33 +520,41 @@ export function Composer({
             <div className="popover-anchor" ref={styleMenuRef}>
               <button
                 type="button"
-                className="tool-chip-btn"
+                className="tool-chip-btn effort-chip-btn"
                 onClick={() => {
                   setAttachOpen(false);
                   setModelOpen(false);
                   setStyleOpen((p) => !p);
                 }}
-                title="Adjust Avi's response voice"
+                aria-expanded={styleOpen}
+                aria-haspopup="menu"
+                title={`Thinking effort: ${activeEffort.label} — ${activeEffort.shortDesc}`}
               >
-                <span>{activeStyle.label}</span>
+                <EffortIcon size={13} className="effort-chip-icon" />
+                <span>{activeEffort.label}</span>
                 <ChevronDown size={13} />
               </button>
 
               {styleOpen && (
-                <div className="composer-popover style-popover">
-                  <div className="popover-title">Response Voice</div>
-                  {VOICE_STYLES.map((style) => (
+                <div className="composer-popover style-popover" role="menu" aria-label="Thinking effort">
+                  <div className="popover-title">Thinking Effort</div>
+                  {THINKING_EFFORTS.map((effort) => (
                     <button
-                      key={style.id}
+                      key={effort.id}
                       type="button"
-                      className={`popover-item ${voiceStyle === style.id ? 'selected' : ''}`}
+                      role="menuitemradio"
+                      aria-checked={thinkingEffort === effort.id}
+                      className={`popover-item ${thinkingEffort === effort.id ? 'selected' : ''}`}
                       onClick={() => {
-                        onChangeVoiceStyle(style.id);
+                        onChangeThinkingEffort(effort.id);
                         setStyleOpen(false);
                       }}
                     >
-                      <strong className="style-item-text">{style.label}</strong>
-                      {voiceStyle === style.id && <Check size={14} className="check-icon" />}
+                      <div className="effort-item-copy">
+                        <strong className="style-item-text">{effort.label}</strong>
+                        <span className="effort-item-desc">{effort.shortDesc}</span>
+                      </div>
+                      {thinkingEffort === effort.id && <Check size={14} className="check-icon" />}
                     </button>
                   ))}
                 </div>
@@ -687,7 +701,29 @@ export function Composer({
         </div>
       </div>
 
-      {!centered && (
+      {centered ? (
+        thinkingEffort === 'fast' && (
+          <p className="effort-hint-line">
+            Fast answers on · Switch to{' '}
+            <button
+              type="button"
+              className="effort-hint-link"
+              onClick={() => onChangeThinkingEffort('medium')}
+            >
+              Medium
+            </button>{' '}
+            or{' '}
+            <button
+              type="button"
+              className="effort-hint-link"
+              onClick={() => onChangeThinkingEffort('deep')}
+            >
+              Deep Reasoning
+            </button>{' '}
+            for fuller depth
+          </p>
+        )
+      ) : (
         <p
           className="composer-disclaimer"
           title="AI proxy grounded in Avi Perera's published writings, research dossiers, and verifiable inline citations."

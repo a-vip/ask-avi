@@ -45,8 +45,8 @@ describe('Minimalist Frontier UI Upgrades', () => {
         onSelectEngine={vi.fn()}
         onToggleWebSearch={vi.fn()}
         onOpenSettings={vi.fn()}
-        voiceStyle="standard"
-        onChangeVoiceStyle={vi.fn()}
+        thinkingEffort="fast"
+        onChangeThinkingEffort={vi.fn()}
         attachedContext={null}
         onAttachContext={vi.fn()}
         onOpenDossierPicker={vi.fn()}
@@ -178,8 +178,8 @@ describe('Minimalist Frontier UI Upgrades', () => {
         onSelectEngine={vi.fn()}
         onToggleWebSearch={vi.fn()}
         onOpenSettings={vi.fn()}
-        voiceStyle="standard"
-        onChangeVoiceStyle={vi.fn()}
+        thinkingEffort="fast"
+        onChangeThinkingEffort={vi.fn()}
         attachedContext={null}
         onAttachContext={vi.fn()}
         onOpenDossierPicker={vi.fn()}
@@ -396,8 +396,8 @@ describe('Minimalist Frontier UI Upgrades', () => {
         onSelectEngine={onSelectEngine}
         onToggleWebSearch={vi.fn()}
         onOpenSettings={vi.fn()}
-        voiceStyle="standard"
-        onChangeVoiceStyle={vi.fn()}
+        thinkingEffort="fast"
+        onChangeThinkingEffort={vi.fn()}
         attachedContexts={[
           { id: 'c1', title: 'SovDash Dossier', content: 'System architecture notes', kind: 'dossier' },
           { id: 'c2', title: 'Geneva Brief', content: 'Public IHL brief excerpt', kind: 'link', sourceUrl: 'https://example.com' },
@@ -489,8 +489,8 @@ describe('Minimalist Frontier UI Upgrades', () => {
         onSelectEngine={authedOnSelect}
         onToggleWebSearch={vi.fn()}
         onOpenSettings={vi.fn()}
-        voiceStyle="standard"
-        onChangeVoiceStyle={vi.fn()}
+        thinkingEffort="fast"
+        onChangeThinkingEffort={vi.fn()}
         attachedContexts={[
           { id: 'a1', title: 'Doc 1', content: 'Signed-in context allowance', kind: 'doc' },
         ]}

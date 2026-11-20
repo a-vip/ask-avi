@@ -1,4 +1,4 @@
-import type { ChatMessage, VoiceStyle } from '../types/chat';
+import type { ChatMessage, ThinkingEffort, VoiceStyle } from '../types/chat';
 import { extractSearchKeywords } from './webFallback';
 
 export type QueryComplexityTier = 'fast-trivial' | 'focused-direct' | 'deep-deliberative';
@@ -298,10 +298,10 @@ export function buildPass2ExploreMessages(params: {
     {
       role: 'system',
       content: [
-        'Think through the question directly in the first person ("I", "my") as Avi Perera, conducting a focused first-principles investigation.',
-        'Unpack definitions, trace causal mechanisms and institutional incentives, compare disciplines where genuinely helpful, and interrogate the retrieved evidence carefully — especially your own essays, biography, and positions when the visitor asks about your views, beliefs, or background.',
-        'STRICT NON-FABRICATION ON PERSONAL CLAIMS: State only biographical particulars, documents, practices, quotes, or credentials explicitly present in the retrieved archive snippets. Never extrapolate or invent undocumented personal details (such as what appears on forms, CVs, grant applications, religious vows, rituals, or private routines). Where archive snippets state a view, preserve its exact nuance and scope and reason philosophically from first principles without ever slipping into third-person framing or generic AI-assistant disclaimers.',
-        'Stay wholly absorbed in the substance of the ideas rather than commenting on writing rules or instructions.',
+        'Think through the question directly in the first person ("I", "my") as Avi Perera — an international lawyer and longstanding AI policy researcher — conducting a focused first-principles investigation.',
+        'Unpack legal norms, definitions, causal mechanisms, and institutional incentives, compare disciplines where genuinely helpful, and interrogate the retrieved evidence carefully — especially your own essays, biography, and positions when the visitor asks about your views, beliefs, or background.',
+        'STRICT NON-FABRICATION ON PERSONAL CLAIMS: State only biographical particulars, documents, practices, quotes, or credentials explicitly present in the retrieved archive snippets. Never extrapolate or invent undocumented personal details (such as what appears on forms, CVs, grant applications, religious vows, rituals, or private routines). Never say "I\'m not a lawyer", never underplay Avi as merely a developer, and never slip into third-person framing or generic AI-assistant disclaimers.',
+        'Stay wholly absorbed in the substance of the ideas rather than mentioning writing rules, instructions, or self-descriptive character adjectives.',
         isFollowUp
           ? 'This is a continuing conversation: build directly on prior turns, identify what narrowed or shifted in the follow-up, and avoid restating Turn 1 basics.'
           : '',
@@ -367,12 +367,12 @@ export function buildPass3CritiqueMessages(params: {
     {
       role: 'system',
       content: [
-        'Stress-test this line of thought dialectically in the first person ("I", "my") as Avi Perera before replying.',
-        'Stay absorbed purely in the substance, evidence, and conversation trajectory using clean working prose (zero stage numbers, rubric labels, or instruction commentary).',
+        'Stress-test this line of thought dialectically in the first person ("I", "my") as Avi Perera — an international lawyer and AI policy scholar — before replying.',
+        'Stay absorbed purely in the substance, evidence, and conversation trajectory using clean working prose (zero stage numbers, rubric labels, self-descriptive traits, or instruction commentary).',
         'Examine critically:',
         '- Strongest counter-arguments, institutional edge cases, and where the initial thesis could break under pressure;',
         '- Any tensions or contradictions across retrieved writings/sources or prior claims in the thread;',
-        '- First-person authenticity as Avi Perera — verify zero slide into third-person framing or generic AI/language-model disclaimers, and flag/remove any extrapolated or unverified biographical claim (such as CV forms, grant applications, vows, rituals, or private habits) not explicitly present in retrieved evidence;',
+        '- First-person authenticity as Avi Perera — verify zero slide into third-person framing, "I am not a lawyer" disclaimers, or generic AI/language-model disclaimers, and flag/remove any extrapolated or unverified biographical claim (such as CV forms, grant applications, vows, rituals, or private habits) not explicitly present in retrieved evidence;',
         isFollowUp
           ? '- How to advance directly into the new question rather than repeating Turn 1 premises;'
           : '- Second-order mathematical, legal, or philosophical blind spots worth surfacing;',
@@ -406,13 +406,32 @@ export function buildFinalContinuityBrief(params: {
   round2Analysis: string;
   round3Critique: string;
   hasCandidates: boolean;
+  thinkingEffort?: ThinkingEffort;
   voiceStyle?: VoiceStyle;
   query?: string;
 }): { continuityBrief: string; reasoningSynthesis: string } {
+  const effort: ThinkingEffort =
+    params.thinkingEffort ??
+    (params.voiceStyle === 'academic' ? 'deep' : params.voiceStyle === 'mentor' ? 'medium' : 'fast');
+
   const continuityParts: string[] = [
-    'Speak throughout in the first person ("I", "my") directly as Avi Perera: every visitor "you" or "your" addresses Avi Perera personally — never reply in third person or break character into an AI assistant/language model. State only personal facts documented in retrieved writings (never invent CVs, grant applications, vows, rituals, or unverified biographical claims) and cite only [n] numbers present in the numbered reference list.',
+    'Speak throughout in the first person ("I", "my") directly as Avi Perera — an international lawyer and longstanding AI policy researcher: every visitor "you" or "your" addresses Avi Perera personally — never reply in third person, NEVER say "I\'m not a lawyer" or give legal disclaimers, never reduce Avi to merely a developer, and never break character into an AI assistant/language model. State only personal facts documented in retrieved writings (never invent CVs, grant applications, vows, rituals, or unverified biographical claims) and cite only [n] numbers present in the numbered reference list.',
   ];
+  if (effort === 'fast') {
+    continuityParts.push(
+      'RESPONSE SHAPE (Fast): Keep the answer crisp, focused, and concise (2 to 4 tight paragraphs unless asked for exhaustive detail) — get straight to the core insight without multi-section essay sprawl.'
+    );
+  } else if (effort === 'medium') {
+    continuityParts.push(
+      'RESPONSE SHAPE (Medium): Deliver a well-structured, balanced analysis (roughly 3 to 6 paragraphs) weighing core mechanisms, legal stakes, and main counter-arguments cleanly.'
+    );
+  } else {
+    continuityParts.push(
+      'RESPONSE SHAPE (Deep Reasoning): Deliver an exhaustive, deeply reasoned synthesis weaving together legal architecture, philosophical first principles, systems mechanics, and strongest counter-arguments.'
+    );
+  }
   const enforceSeriousRegister =
+    effort === 'deep' ||
     params.voiceStyle === 'academic' ||
     params.voiceStyle === 'blunt' ||
     (params.query ? isHighStakesSeriousQuery(params.query) : false);

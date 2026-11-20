@@ -3048,7 +3048,7 @@ a {
 
 .voice-choice-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -4119,6 +4119,73 @@ a {
   background: var(--accent);
   color: #06121f;
   border-color: var(--accent);
+}
+
+/* Thinking Effort Controls & Minimal Indicators */
+.effort-chip-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.style-popover {
+  min-width: 238px;
+}
+
+.effort-item-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  flex: 1;
+  text-align: left;
+}
+
+.effort-item-desc {
+  font-size: 0.72rem;
+  color: var(--text-3);
+  line-height: 1.3;
+  font-weight: 400;
+}
+
+.effort-card-desc {
+  font-size: 0.73rem;
+  color: var(--text-3);
+  line-height: 1.35;
+}
+
+.effort-hint-line {
+  margin: 8px 0 0;
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--text-3);
+  line-height: 1.4;
+}
+
+.effort-hint-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text-2);
+  font-size: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.effort-hint-link:hover {
+  color: var(--accent);
+  text-decoration-color: var(--accent);
+}
+
+.msg-deeper-btn {
+  color: var(--accent);
+}
+
+.msg-deeper-btn:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 @keyframes fadeInUp {

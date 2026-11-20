@@ -5,6 +5,7 @@ import type {
   CustomApiConfig,
   EngineId,
   RetrievedSource,
+  ThinkingEffort,
   VoiceStyle,
   WebSource,
 } from '../types/chat';
@@ -36,7 +37,7 @@ import {
   mergeUniqueQueries,
 } from './geminiStream';
 import { knowledgeIndex } from './rag';
-import { fetchTargetedWebResearch } from './webFallback';
+import { extractSearchKeywords, fetchTargetedWebResearch } from './webFallback';
 
 export class BackendNotConfiguredError extends Error {
   constructor(message: string) {
@@ -134,7 +135,8 @@ export interface StreamGenerateParams {
   query: string;
   history: ChatMessage[];
   engineId: EngineId;
-  voiceStyle: VoiceStyle;
+  thinkingEffort?: ThinkingEffort;
+  voiceStyle?: VoiceStyle;
   webSearchEnabled: boolean;
   turnId?: string;
   threadId?: string;
@@ -163,6 +165,20 @@ export interface StreamGenerateResult extends StreamProgressPayload {
   isContentGap?: boolean;
   gapTopic?: string;
   complexityTier?: QueryComplexityTier;
+  thinkingEffort?: ThinkingEffort;
+}
+
+function resolveRequestEffort(params: StreamGenerateParams): ThinkingEffort {
+  if (
+    params.thinkingEffort === 'fast' ||
+    params.thinkingEffort === 'medium' ||
+    params.thinkingEffort === 'deep'
+  ) {
+    return params.thinkingEffort;
+  }
+  if (params.voiceStyle === 'academic') return 'deep';
+  if (params.voiceStyle === 'mentor') return 'medium';
+  return 'fast';
 }
 
 function buildConversationWindow(
@@ -499,7 +515,7 @@ class AviLLMService {
   private async runIterativeDeliberation(opts: {
     params: StreamGenerateParams;
     initialSources: RetrievedSource[];
-    deepReasoning: boolean;
+    effort: ThinkingEffort;
     pipelineStartedAt: number;
   }): Promise<{
     candidates: CandidateSource[];
@@ -517,7 +533,7 @@ class AviLLMService {
     gapTopic?: string;
     complexityTier: QueryComplexityTier;
   }> {
-    const { params, initialSources, deepReasoning, pipelineStartedAt } = opts;
+    const { params, initialSources, effort, pipelineStartedAt } = opts;
     const isFollowUp = params.history.length > 0;
     const attachedBlock = resolveAttachedPromptBlock(params);
     const complexity = classifyQueryComplexity(
@@ -565,6 +581,80 @@ class AviLLMService {
       };
     }
 
+    // Fast effort bypasses intermediate deliberation passes for crisp, direct answers
+    if (effort === 'fast') {
+      if (params.webSearchEnabled && params.query.trim().length >= 12) {
+        const recentUserHint = params.history
+          .filter((m) => m.role === 'user')
+          .slice(-1)
+          .map((m) => m.content)
+          .join(' ');
+        const kw = extractSearchKeywords(params.query, recentUserHint);
+        if (kw) {
+          publishThoughts('', 'Checking live references');
+          const quickWeb = await fetchTargetedWebResearch([kw], {
+            userSignal: params.signal,
+            maxSources: 4,
+            timeoutMs: 2200,
+          });
+          if (quickWeb.queries.length > 0) {
+            webSearchQueries = mergeUniqueQueries(webSearchQueries, quickWeb.queries);
+          }
+          if (quickWeb.webSources.length > 0) {
+            webSources = mergeDistinctWebItems(webSources, quickWeb.webSources, 4);
+          }
+        }
+      }
+
+      const candidates = mergeCandidateSources(archiveSources, webSources);
+      const formatted = splitFormattedCandidateBlocks(candidates);
+      const quickPlan: PlannerResult = {
+        coreQuestion: params.query.trim(),
+        conversationShift: isFollowUp ? 'continuing' : 'initial',
+        priorCommitments: isFollowUp
+          ? 'Continue directly from prior turns without restating opening summaries.'
+          : '',
+        angles: [],
+        archiveQueries: [],
+        webQueries: [],
+      };
+      const { continuityBrief, reasoningSynthesis } = buildFinalContinuityBrief({
+        plan: quickPlan,
+        isFollowUp,
+        round2Analysis: '',
+        round3Critique: '',
+        hasCandidates: candidates.length > 0,
+        thinkingEffort: 'fast',
+        voiceStyle: params.voiceStyle,
+        query: params.query,
+      });
+
+      const topRagScore = archiveSources.reduce((mx, s) => Math.max(mx, s.score), 0);
+      const ragMatchCount = archiveSources.length;
+      const isContentGap =
+        params.query.trim().length >= 18 && (topRagScore < 6.2 || ragMatchCount === 0);
+      const gapTopic = isContentGap
+        ? params.query.replace(/\s+/g, ' ').trim().slice(0, 180)
+        : undefined;
+
+      return {
+        candidates,
+        archiveBlock: formatted.archiveBlock,
+        webContext: formatted.webContext,
+        archiveSources: formatted.archiveCandidates,
+        webSources: formatted.webCandidates,
+        webSearchQueries,
+        accumulatedThoughts: '',
+        continuityBrief,
+        reasoningSynthesis,
+        topRagScore,
+        ragMatchCount,
+        isContentGap,
+        gapTopic,
+        complexityTier: complexity.tier,
+      };
+    }
+
     // Stage 1: Conversation State Parsing & Research Strategy
     const stage1Phase = isFollowUp
       ? 'Mapping follow-up shift & conversation history'
@@ -584,7 +674,7 @@ class AviLLMService {
         attachedSummary: attachedBlock,
       }),
       reasoningEffort: 'low',
-      maxTokens: 900,
+      maxTokens: effort === 'deep' ? 900 : 750,
       temperature: 0.2,
     });
     const plan: PlannerResult = parsePlannerResult(planPass.summary, params.query, params.history);
@@ -617,8 +707,8 @@ class AviLLMService {
     if (params.webSearchEnabled && plan.webQueries.length > 0) {
       const roundA = await fetchTargetedWebResearch(plan.webQueries, {
         userSignal: params.signal,
-        maxSources: 5,
-        timeoutMs: 5500,
+        maxSources: effort === 'deep' ? 5 : 4,
+        timeoutMs: effort === 'deep' ? 5500 : 3800,
       });
       if (roundA.queries.length > 0) {
         webSearchQueries = mergeUniqueQueries(webSearchQueries, roundA.queries);
@@ -632,7 +722,7 @@ class AviLLMService {
     let round2CleanAnalysis = '';
     let round3Critique = '';
 
-    if (deepReasoning && complexity.tier === 'deep-deliberative' && !params.signal?.aborted) {
+    if (complexity.tier === 'deep-deliberative' && !params.signal?.aborted) {
       // Stage 2: Multi-Angle First-Principles Exploration & Evidence Interrogation
       const initialCandidates = mergeCandidateSources(archiveSources, webSources);
       const initialPoolBlocks = splitFormattedCandidateBlocks(initialCandidates);
@@ -653,7 +743,7 @@ class AviLLMService {
           attachedBlock,
         }),
         reasoningEffort: 'medium',
-        maxTokens: 1600,
+        maxTokens: effort === 'deep' ? 1600 : 1100,
         temperature: 0.45,
         onThoughtStream: (live) => {
           const { cleanAnalysis } = extractFollowUpQueries(live);
@@ -674,60 +764,62 @@ class AviLLMService {
         publishThoughts('', stage2Phase);
       }
 
-      // Research Pass B: Adaptive Secondary Retrieval driven by Stage 2 discoveries
-      if (params.webSearchEnabled && followUpQueries.length > 0 && !params.signal?.aborted) {
-        const extraRag = knowledgeIndex.multiSearch(followUpQueries, { topK: 2, minScore: 4.5 });
-        if (extraRag.sources.length > 0) {
-          archiveSources = mergeDistinctArchiveSources(archiveSources, extraRag.sources, 5);
+      if (effort === 'deep') {
+        // Research Pass B: Adaptive Secondary Retrieval driven by Stage 2 discoveries
+        if (params.webSearchEnabled && followUpQueries.length > 0 && !params.signal?.aborted) {
+          const extraRag = knowledgeIndex.multiSearch(followUpQueries, { topK: 2, minScore: 4.5 });
+          if (extraRag.sources.length > 0) {
+            archiveSources = mergeDistinctArchiveSources(archiveSources, extraRag.sources, 5);
+          }
+          const roundB = await fetchTargetedWebResearch(followUpQueries, {
+            userSignal: params.signal,
+            maxSources: 3,
+            timeoutMs: 4500,
+          });
+          if (roundB.queries.length > 0) {
+            webSearchQueries = mergeUniqueQueries(webSearchQueries, roundB.queries);
+          }
+          if (roundB.webSources.length > 0) {
+            webSources = mergeDistinctWebItems(webSources, roundB.webSources, 7);
+          }
+          publishThoughts('', 'Following secondary research leads');
         }
-        const roundB = await fetchTargetedWebResearch(followUpQueries, {
-          userSignal: params.signal,
-          maxSources: 3,
-          timeoutMs: 4500,
-        });
-        if (roundB.queries.length > 0) {
-          webSearchQueries = mergeUniqueQueries(webSearchQueries, roundB.queries);
-        }
-        if (roundB.webSources.length > 0) {
-          webSources = mergeDistinctWebItems(webSources, roundB.webSources, 7);
-        }
-        publishThoughts('', 'Following secondary research leads');
-      }
 
-      // Stage 3: Adversarial Verification, Contradictions & Conversation Continuity Check
-      if (!params.signal?.aborted && (round2CleanAnalysis || isFollowUp)) {
-        const updatedCandidates = mergeCandidateSources(archiveSources, webSources);
-        const updatedPoolBlocks = splitFormattedCandidateBlocks(updatedCandidates);
-        const poolTextB = [updatedPoolBlocks.archiveBlock, updatedPoolBlocks.webContext]
-          .filter(Boolean)
-          .join('\n\n');
+        // Stage 3: Adversarial Verification, Contradictions & Conversation Continuity Check
+        if (!params.signal?.aborted && (round2CleanAnalysis || isFollowUp)) {
+          const updatedCandidates = mergeCandidateSources(archiveSources, webSources);
+          const updatedPoolBlocks = splitFormattedCandidateBlocks(updatedCandidates);
+          const poolTextB = [updatedPoolBlocks.archiveBlock, updatedPoolBlocks.webContext]
+            .filter(Boolean)
+            .join('\n\n');
 
-        const stage3Phase = 'Stress-testing counter-arguments & edge cases';
-        publishThoughts('', stage3Phase);
-
-        const critiquePass = await this.streamDeliberationPass({
-          params,
-          messages: buildPass3CritiqueMessages({
-            plan,
-            query: params.query,
-            history: params.history,
-            round2Analysis: round2CleanAnalysis || plan.coreQuestion,
-            candidatePoolBlock: poolTextB,
-          }),
-          reasoningEffort: 'medium',
-          maxTokens: 1700,
-          temperature: 0.35,
-          onThoughtStream: (live) => {
-            publishThoughts(
-              `**Stress-testing counter-arguments & context**\n\n${live}`,
-              stage3Phase
-            );
-          },
-        });
-        round3Critique = critiquePass.summary;
-        if (critiquePass.display) {
-          thoughtSections.push(`**Stress-testing counter-arguments & context**\n\n${critiquePass.display}`);
+          const stage3Phase = 'Stress-testing counter-arguments & edge cases';
           publishThoughts('', stage3Phase);
+
+          const critiquePass = await this.streamDeliberationPass({
+            params,
+            messages: buildPass3CritiqueMessages({
+              plan,
+              query: params.query,
+              history: params.history,
+              round2Analysis: round2CleanAnalysis || plan.coreQuestion,
+              candidatePoolBlock: poolTextB,
+            }),
+            reasoningEffort: 'medium',
+            maxTokens: 1700,
+            temperature: 0.35,
+            onThoughtStream: (live) => {
+              publishThoughts(
+                `**Stress-testing counter-arguments & context**\n\n${live}`,
+                stage3Phase
+              );
+            },
+          });
+          round3Critique = critiquePass.summary;
+          if (critiquePass.display) {
+            thoughtSections.push(`**Stress-testing counter-arguments & context**\n\n${critiquePass.display}`);
+            publishThoughts('', stage3Phase);
+          }
         }
       }
     }
@@ -740,6 +832,7 @@ class AviLLMService {
       round2Analysis: round2CleanAnalysis,
       round3Critique,
       hasCandidates: candidates.length > 0,
+      thinkingEffort: effort,
       voiceStyle: params.voiceStyle,
       query: params.query,
     });
@@ -789,10 +882,12 @@ class AviLLMService {
     }
 
     const pipelineStartedAt = Date.now();
+    const requestedEffort = resolveRequestEffort(params);
+    const effectiveEffort: ThinkingEffort = tier === 'oss-fast' ? 'fast' : requestedEffort;
     const delib = await this.runIterativeDeliberation({
       params,
       initialSources: sources,
-      deepReasoning: tier === 'oss-reasoning',
+      effort: effectiveEffort,
       pipelineStartedAt,
     });
 
@@ -802,6 +897,7 @@ class AviLLMService {
       isContentGap: delib.isContentGap,
       gapTopic: delib.gapTopic,
       complexityTier: delib.complexityTier,
+      thinkingEffort: effectiveEffort,
     };
 
     const attachedPromptBlock = resolveAttachedPromptBlock(params);
@@ -809,7 +905,7 @@ class AviLLMService {
     const historyTurns = buildConversationWindow(params.history, 18, 20000);
     const buildDirectOpenAIMessages = () => {
       const systemInstruction = buildAviSystemPrompt(
-        params.voiceStyle,
+        effectiveEffort,
         delib.archiveSources,
         attachedPromptBlock,
         false,
@@ -827,8 +923,16 @@ class AviLLMService {
       ];
     };
     const openAIMessages = hasDirectKey ? buildDirectOpenAIMessages() : [];
-    const temperature = params.voiceStyle === 'academic' ? 0.5 : 0.72;
-    const finalReasoningEffort = tier === 'oss-fast' ? 'low' : 'medium';
+    const temperature =
+      effectiveEffort === 'deep' || params.voiceStyle === 'academic'
+        ? 0.55
+        : effectiveEffort === 'fast'
+          ? 0.65
+          : 0.72;
+    const finalReasoningEffort =
+      effectiveEffort === 'deep' ? 'high' : effectiveEffort === 'medium' ? 'medium' : 'low';
+    const finalMaxTokens =
+      effectiveEffort === 'fast' ? 1600 : effectiveEffort === 'medium' ? 3600 : 8192;
 
     let lastProvider = 'Open-Source API';
     let lastStatus = 502;
@@ -850,7 +954,7 @@ class AviLLMService {
           messages: openAIMessages,
           stream: true,
           temperature,
-          max_tokens: tier === 'oss-fast' ? 4096 : 8192,
+          max_tokens: finalMaxTokens,
         };
         if (providerKind === 'groq' && model.startsWith('openai/gpt-oss')) {
           payload.reasoning_format = 'parsed';
@@ -954,8 +1058,10 @@ class AviLLMService {
           turnIndex: params.turnIndex,
           topRagScore: delib.topRagScore,
           ragMatchCount: delib.ragMatchCount,
+          thinkingEffort: effectiveEffort,
           reasoningEffort: finalReasoningEffort,
-          voiceStyle: params.voiceStyle,
+          maxTokens: finalMaxTokens,
+          voiceStyle: params.voiceStyle ?? 'standard',
           archiveBlock: delib.archiveBlock,
           webContext: delib.webContext,
           continuityBrief: delib.continuityBrief,
@@ -1038,10 +1144,17 @@ class AviLLMService {
     }
 
     const pipelineStartedAt = Date.now();
+    const effort = resolveRequestEffort(params);
+    const effectiveThinkingBudget =
+      effort === 'fast'
+        ? 2048
+        : effort === 'medium'
+          ? Math.min(thinkingBudget, 8192)
+          : thinkingBudget;
     const delib = await this.runIterativeDeliberation({
       params,
       initialSources: sources,
-      deepReasoning: true,
+      effort,
       pipelineStartedAt,
     });
 
@@ -1060,13 +1173,19 @@ class AviLLMService {
       isContentGap: delib.isContentGap,
       gapTopic: delib.gapTopic,
       complexityTier: delib.complexityTier,
+      thinkingEffort: effort,
     };
-    const temperature = params.voiceStyle === 'academic' ? 0.5 : 0.78;
+    const temperature =
+      effort === 'deep' || params.voiceStyle === 'academic'
+        ? 0.55
+        : effort === 'fast'
+          ? 0.65
+          : 0.78;
     let activeModelId = primaryModelId;
 
     const buildInstruction = () =>
       buildAviSystemPrompt(
-        params.voiceStyle,
+        effort,
         delib.archiveSources,
         resolveAttachedPromptBlock(params),
         false,
@@ -1088,7 +1207,12 @@ class AviLLMService {
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
           modelId
         )}:streamGenerateContent?alt=sse`;
-        const maxGeminiOutput = opt.id === 'gemini-pro' || thinkingBudget >= 20000 ? 32768 : 16384;
+        const maxGeminiOutput =
+          effort === 'fast'
+            ? 4096
+            : opt.id === 'gemini-pro' || effectiveThinkingBudget >= 20000
+              ? 32768
+              : 16384;
         const bodyPayload: Record<string, unknown> = {
           systemInstruction: { parts: [{ text: buildInstruction() }] },
           contents,
@@ -1098,7 +1222,7 @@ class AviLLMService {
             maxOutputTokens: maxGeminiOutput,
             thinkingConfig: {
               includeThoughts: true,
-              thinkingBudget,
+              thinkingBudget: effectiveThinkingBudget,
             },
           },
         };
@@ -1162,14 +1286,15 @@ class AviLLMService {
           topRagScore: delib.topRagScore,
           ragMatchCount: delib.ragMatchCount,
           model: primaryModelId,
-          voiceStyle: params.voiceStyle,
+          thinkingEffort: effort,
+          voiceStyle: params.voiceStyle ?? 'standard',
           archiveBlock: delib.archiveBlock,
           webContext: delib.webContext,
           continuityBrief: delib.continuityBrief,
           reasoningSynthesis: delib.reasoningSynthesis,
           attachedContext: resolveAttachedPromptBlock(params) ?? '',
           contents,
-          thinkingBudget,
+          thinkingBudget: effectiveThinkingBudget,
           enableSearch: params.webSearchEnabled,
           temperature,
         }),
@@ -1251,8 +1376,9 @@ class AviLLMService {
         ? `Respond directly to the user's newest message ("${params.query.trim()}") in continuity with prior turns; do not repeat earlier answers.`
         : '';
 
+    const effort = resolveRequestEffort(params);
     const systemPrompt = buildAviSystemPrompt(
-      params.voiceStyle,
+      effort,
       formatted.archiveCandidates,
       resolveAttachedPromptBlock(params),
       true,
@@ -1299,6 +1425,7 @@ class AviLLMService {
       initialQueries: webSearchQueries,
       accumulatedPrefixThoughts: '',
       pipelineStartedAt,
+      delibMeta: { thinkingEffort: effort },
       onUpdate: params.onUpdate,
     });
   }
@@ -1319,6 +1446,7 @@ class AviLLMService {
       isContentGap?: boolean;
       gapTopic?: string;
       complexityTier?: QueryComplexityTier;
+      thinkingEffort?: ThinkingEffort;
     };
     onUpdate: (update: StreamProgressPayload) => void;
   }): Promise<StreamGenerateResult> {

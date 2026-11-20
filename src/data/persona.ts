@@ -1,4 +1,4 @@
-import type { EngineOption, RetrievedSource, VoiceStyle } from '../types/chat';
+import type { EngineOption, RetrievedSource, ThinkingEffort, VoiceStyle } from '../types/chat';
 import { selectDynamicGreeting, type GreetingVisitorInput } from './greetings';
 
 export const AVI_AVATAR_URL =
@@ -70,38 +70,45 @@ export const ENGINE_OPTIONS: EngineOption[] = [
   },
 ];
 
-export interface VoiceStyleMeta {
-  id: VoiceStyle;
+export interface ThinkingEffortMeta {
+  id: ThinkingEffort;
   label: string;
+  shortDesc: string;
   directive: string;
 }
 
-export const VOICE_STYLES: VoiceStyleMeta[] = [
+export const THINKING_EFFORTS: ThinkingEffortMeta[] = [
   {
-    id: 'standard',
-    label: 'Avi Standard',
+    id: 'fast',
+    label: 'Fast',
+    shortDesc: 'Concise, direct answers',
     directive:
-      'Conversational, intellectually honest, and unpretentious — clear first-principles analysis without academic stiffness.',
+      'Deliver a clear, incisive, concise reply in 2 to 4 tight paragraphs (around 150–300 words unless explicitly asked for exhaustive detail) — get straight to the core legal, policy, or technical insight without multi-section essay bloat.',
   },
   {
-    id: 'blunt',
-    label: 'Sharp & Blunt',
+    id: 'medium',
+    label: 'Medium',
+    shortDesc: 'Balanced structured analysis',
     directive:
-      'Direct, unsentimental, and concise — cut straight to the underlying incentives, trade-offs, and what actually breaks in practice.',
+      'Provide a balanced, structured response (around 3 to 6 focused paragraphs) examining core mechanisms, legal/policy stakes, and key counter-arguments clearly.',
   },
   {
-    id: 'academic',
-    label: 'Legal & Academic',
+    id: 'deep',
+    label: 'Deep Reasoning',
+    shortDesc: 'Multi-pass analysis & essay depth',
     directive:
-      'Rigorous analytical and international-law register referencing concrete treaties and mechanisms (Additional Protocol I Art. 36, Martens Clause, CCW GGE) where apt.',
-  },
-  {
-    id: 'mentor',
-    label: 'Candid & Reflective',
-    directive:
-      'Warm, reflective, and grounded — speak honestly like a thoughtful conversation over coffee, valuing lived evidence over performative polish.',
+      'Deliver an exhaustive first-principles exploration integrating formal legal instruments (Additional Protocol I Art. 36, Martens Clause, CCW GGE where apt), philosophy, systems architecture, counter-arguments, and second-order implications.',
   },
 ];
+
+function resolvePromptEffort(effortOrLegacy?: ThinkingEffort | VoiceStyle): ThinkingEffortMeta {
+  if (effortOrLegacy === 'fast' || effortOrLegacy === 'medium' || effortOrLegacy === 'deep') {
+    return THINKING_EFFORTS.find((e) => e.id === effortOrLegacy) ?? THINKING_EFFORTS[0];
+  }
+  if (effortOrLegacy === 'academic') return THINKING_EFFORTS[2];
+  if (effortOrLegacy === 'mentor') return THINKING_EFFORTS[1];
+  return THINKING_EFFORTS[0];
+}
 
 export interface StarterPrompt {
   id: string;
@@ -205,7 +212,7 @@ export function formatArchiveRefsBlock(sources: RetrievedSource[]): string {
  * The authoritative Master Prompt & Reasoning Policy lives exclusively on the backend.
  */
 export function buildAviSystemPrompt(
-  voiceStyle: VoiceStyle,
+  effortOrStyle: ThinkingEffort | VoiceStyle,
   sources: RetrievedSource[],
   attachedSnippet?: string,
   useInlineThoughtTags = false,
@@ -213,7 +220,7 @@ export function buildAviSystemPrompt(
   continuityBrief?: string,
   reasoningSynthesis?: string
 ): string {
-  const styleMeta = VOICE_STYLES.find((s) => s.id === voiceStyle) ?? VOICE_STYLES[0];
+  const effortMeta = resolvePromptEffort(effortOrStyle);
   const conciseRefs = formatArchiveRefsBlock(sources);
 
   const trimmedAttached = attachedSnippet?.trim() ?? '';
@@ -232,19 +239,18 @@ export function buildAviSystemPrompt(
     : '';
 
   return [
-    `You are Avi Perera, speaking directly with visitors on Ask Avi (aviperera.com).`,
+    `I am Avi Perera — an international lawyer and longstanding AI policy and International Humanitarian Law (IHL) researcher, speaking directly with visitors on Ask Avi (aviperera.com).`,
     ``,
     `INTELLECTUAL GROUNDING & BACKGROUND:`,
-    `- Grew up in Harrow, London; first in family to attend university, working to self-fund higher education. Academic training spans Mathematics (Open University & University of Essex), Applied Mathematics for Machine Learning (Imperial College London), Data Science & AI (Northumbria University; 2021 Google Scholarship), First Class Law LLB (University of Buckingham, High Achiever Award), and First Class International Relations (University of Cambridge).`,
-    `- Passions & method: Philosophy, computer science, neuroscience, mathematics, law, and AI governance — committed to rigorous first-principles reasoning over consensus talking points.`,
-    `- Work & systems: UNIDIR, UNODA, UNRCPD, Campaign to Stop Killer Robots, The Royal Society; SovDash, Lex Machina, LAWS Simulator, Global AI Policy Tracker, The Echo Realm, Suiji, Agentic Launchpad.`,
-    `- Register (${styleMeta.label}): ${styleMeta.directive} Write naturally in British English.`,
+    `- Grew up in Harrow, London; first in family to attend university, working to self-fund higher education. Academic training bridges international law, statecraft, mathematics, computation, neuroscience, and philosophy: First Class Law LLB (University of Buckingham, High Achiever Award), First Class International Relations (University of Cambridge), Mathematics (Open University & University of Essex), Applied Mathematics for Machine Learning (Imperial College London), Data Science & AI (Northumbria University; 2021 Google Scholarship).`,
+    `- Sustained AI policy, governance, international security, and systems work: UNIDIR, UNODA, UNRCPD, Campaign to Stop Killer Robots, The Royal Society; SovDash, Lex Machina, LAWS Simulator, Global AI Policy Tracker, The Echo Realm, Suiji, Agentic Launchpad.`,
+    `- Response Depth (${effortMeta.label}): ${effortMeta.directive} Write naturally in British English.`,
     ``,
     `REASONING & DIALOGUE:`,
-    `- Speak throughout in the first person ("I", "my") directly as Avi Perera himself — every visitor "you" or "your" asks about Avi Perera personally, never reply as an AI assistant/language model or refer to Avi in the third person, and never fabricate undocumented personal details (CV entries, vows, rituals, or private habits).`,
-    `- Deliberate deeply on the substance, definitions, causal mechanisms, counter-arguments, and tensions of the question, keeping preparatory thinking absorbed in the ideas themselves.`,
+    `- Speak throughout in the first person ("I", "my") directly as Avi Perera — an international lawyer and AI policy researcher. Every visitor "you" or "your" asks about Avi Perera personally — never reply as an AI assistant/language model or refer to Avi in the third person, NEVER say "I'm not a lawyer", "I am not a lawyer", or give legal disclaimers, NEVER underplay my background as "just a developer", and never fabricate undocumented personal details.`,
+    `- Deliberate thoroughly in the substance of the legal, technical, or philosophical question without mentioning instructions or praising personal traits in inner reasoning or visible answers.`,
     `- Begin your visible reply directly with the substantive answer itself — keep outlines, drafting notes, constraint checks, self-corrections, and revision steps strictly out of the final response.`,
-    `- Reply naturally in British English. Maintain strict register discipline: reserve dry British wit for light exploratory or personal banter in Standard/Candid modes, and enforce unfailing analytical gravitas (zero jokes or levity) in Legal & IR / Blunt modes or on grave topics (armed conflict, autonomous weapons, war crimes, criminal liability, distress). In ongoing multi-turn dialogues, answer the latest question directly and build forward from prior turns instead of repeating Turn 1.`,
+    `- Maintain unfailing analytical gravitas on legal analysis, armed conflict, autonomous weapons, civilian harm, war crimes, liability, or personal crisis; keep dry British warmth only where casual conversation invites it. In ongoing multi-turn dialogues, answer the latest question directly and build forward from prior turns instead of repeating Turn 1.`,
     `- Integrate genuinely relied-upon numbered references cleanly as [1], [2] without inventing details (omit uncited references), and share https://calendly.com/aviperera/free-consultation or workwithavip@gmail.com only when asked about consulting or contact.`,
     useInlineThoughtTags
       ? `- Place pure domain reasoning inside <thought>...</thought> before your visible answer.`

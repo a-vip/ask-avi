@@ -9,6 +9,8 @@ export type EngineId =
 
 export type EngineProviderKind = 'open-source' | 'google' | 'custom';
 
+export type ThinkingEffort = 'fast' | 'medium' | 'deep';
+
 export type VoiceStyle = 'standard' | 'blunt' | 'academic' | 'mentor';
 
 export interface KnowledgeEntry {
@@ -74,6 +76,7 @@ export interface ChatMessage {
   createdAt: number;
   engineUsed?: EngineId;
   modelLabel?: string;
+  thinkingEffort?: ThinkingEffort;
   voiceStyle?: VoiceStyle;
   sources?: RetrievedSource[];
   retrievalMs?: number;
@@ -144,7 +147,8 @@ export interface UserProfile {
 export interface AppSettings {
   theme: ThemeMode;
   engineId: EngineId;
-  voiceStyle: VoiceStyle;
+  thinkingEffort: ThinkingEffort;
+  voiceStyle?: VoiceStyle;
   webSearchEnabled: boolean;
   groqApiKey: string;
   openRouterApiKey: string;

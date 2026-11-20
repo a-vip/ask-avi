@@ -48,7 +48,20 @@ $cleanMeta = static function ($val): string {
 $turnId = $cleanMeta($body['turnId'] ?? '');
 $threadId = $cleanMeta($body['threadId'] ?? '');
 $turnIndex = isset($body['turnIndex']) && is_numeric($body['turnIndex']) ? max(1, (int) $body['turnIndex']) : 1;
+$thinkingEffortRaw = strtolower($cleanMeta($body['thinkingEffort'] ?? ''));
 $voiceStyle = $cleanMeta($body['voiceStyle'] ?? 'standard') ?: 'standard';
+if (in_array($thinkingEffortRaw, ['fast', 'medium', 'deep'], true)) {
+  $thinkingEffort = $thinkingEffortRaw;
+} elseif ($mode === 'oss-fast') {
+  $thinkingEffort = 'fast';
+} elseif ($voiceStyle === 'academic') {
+  $thinkingEffort = 'deep';
+} elseif ($voiceStyle === 'mentor') {
+  $thinkingEffort = 'medium';
+} else {
+  $thinkingEffort = 'fast';
+}
+$loggedModeLabel = $thinkingEffortRaw !== '' ? $thinkingEffort : $voiceStyle;
 $engineId = $cleanMeta($body['engineId'] ?? $mode) ?: $mode;
 $topRagScore = isset($body['topRagScore']) && is_numeric($body['topRagScore']) ? (float) $body['topRagScore'] : 0.0;
 $ragMatchCount = isset($body['ragMatchCount']) && is_numeric($body['ragMatchCount']) ? max(0, (int) $body['ragMatchCount']) : 0;
@@ -76,7 +89,7 @@ $qaContext = [
   'turnId' => $turnId,
   'threadId' => $threadId,
   'turnIndex' => $turnIndex,
-  'voiceStyle' => $voiceStyle,
+  'voiceStyle' => $loggedModeLabel,
   'engineId' => $engineId,
   'topRagScore' => $topRagScore,
   'ragMatchCount' => $ragMatchCount,
@@ -87,14 +100,15 @@ $qaContext = [
 // Untrusted client payloads never override the Master Prompt directly.
 $systemInstruction = ask_avi_assemble_system_prompt(
   (string) ($settings['master_prompt'] ?? ''),
-  (string) ($body['voiceStyle'] ?? 'standard'),
+  $voiceStyle,
   (string) ($body['archiveBlock'] ?? ''),
   (string) ($body['webContext'] ?? ''),
   (string) ($body['attachedContext'] ?? ''),
   $isAuthenticated,
   (string) ($body['continuityBrief'] ?? ''),
   (string) ($body['reasoningSynthesis'] ?? ''),
-  $phase
+  $phase,
+  $thinkingEffort
 );
 
 function ask_avi_clip_text(string $text, int $limit): string {
@@ -378,8 +392,8 @@ if ($mode === 'google') {
   foreach ($candidates as $model) {
     $attemptFlags = $searchAllowed ? [true, false] : [false];
     foreach ($attemptFlags as $withSearch) {
-      $isDeepGemini = $budget >= 20000 || in_array($primary, ['gemini-4-hydrogen', 'gemini-3.1-pro-preview', 'gemini-pro-latest'], true);
-      $maxGeminiOutput = $isDeepGemini ? 32768 : 16384;
+      $isDeepGemini = $thinkingEffort === 'deep' || $budget >= 20000 || in_array($primary, ['gemini-4-hydrogen', 'gemini-3.1-pro-preview', 'gemini-pro-latest'], true);
+      $maxGeminiOutput = $thinkingEffort === 'fast' ? 4096 : ($isDeepGemini ? 32768 : 16384);
       $payload = [
         'contents' => array_slice($body['contents'], -24),
         'generationConfig' => [
@@ -441,8 +455,11 @@ if ($groqKey === '' && $openRouterKey === '') {
 
 $messages = ask_avi_to_openai_messages($body['contents'], $systemInstruction, $isAuthenticated);
 $isFast = ($mode === 'oss-fast');
-$resolvedMaxTokens = $reqMaxTokens > 0 ? $reqMaxTokens : ($isFast ? 4096 : 8192);
-$resolvedEffort = $isFast ? 'low' : ($reqEffort !== '' ? $reqEffort : 'high');
+$isConcisePass = $isFast || ($phase === 'final' && $thinkingEffort === 'fast');
+$defaultMaxTokens = $isConcisePass ? 1600 : ($thinkingEffort === 'medium' ? 3600 : 8192);
+$resolvedMaxTokens = $reqMaxTokens > 0 ? $reqMaxTokens : $defaultMaxTokens;
+$defaultEffort = $isConcisePass ? 'low' : ($thinkingEffort === 'medium' ? 'medium' : 'high');
+$resolvedEffort = $reqEffort !== '' ? $reqEffort : $defaultEffort;
 $groqModels = $isFast
   ? ['openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-120b']
   : ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];

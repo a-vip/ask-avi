@@ -57,26 +57,26 @@ describe('Dynamic contextual greeting repository', () => {
     expect(resolveSeason(6, 'Australia/Sydney')).toBe('winter');
   });
 
-  it('surfaces contextual matches including time, city, voice mode, and signed-in first name', () => {
+  it('surfaces contextual matches including time, city, thinking effort, and signed-in first name', () => {
     const bangkokEvening = resolveVisitorSignals({
       now: new Date(2026, 10, 18, 21, 15, 0),
       timeZone: 'Asia/Bangkok',
       userName: 'Sarah Connor',
       isAuthenticated: true,
       threadCount: 2,
-      voiceStyle: 'blunt',
+      thinkingEffort: 'deep',
       skipVisitTracking: true,
     });
 
     const eligibleIds = getEligibleGreetings(bangkokEvening).map((g) => g.id);
     expect(eligibleIds).toContain('reg-bangkok-evening');
     expect(eligibleIds).toContain('cad-back-at-it-named');
-    expect(eligibleIds).toContain('ctx-blunt-mode');
+    expect(eligibleIds).toContain('ctx-deep-mode');
 
     const kicker = buildGreetingKicker(bangkokEvening);
     expect(kicker).toContain('21:15');
     expect(kicker).toContain('Bangkok time');
-    expect(kicker).toContain('Blunt mode');
+    expect(kicker).toContain('Deep Reasoning');
 
     const picked = selectDynamicGreeting({
       now: new Date(2026, 10, 18, 17, 30, 0),
@@ -106,7 +106,7 @@ describe('Dynamic contextual greeting repository', () => {
       userName: 'Alexander Hamilton',
       isAuthenticated: true,
       threadCount: 12,
-      voiceStyle: 'standard',
+      thinkingEffort: 'fast',
       corpusCount: 143,
       skipVisitTracking: true,
     });
@@ -146,8 +146,8 @@ describe('Dynamic contextual greeting repository', () => {
           onSelectEngine={vi.fn()}
           onToggleWebSearch={vi.fn()}
           onOpenSettings={vi.fn()}
-          voiceStyle="standard"
-          onChangeVoiceStyle={vi.fn()}
+          thinkingEffort="fast"
+          onChangeThinkingEffort={vi.fn()}
           onOpenDossierPicker={vi.fn()}
           userName="Avi"
           isAuthenticated={true}

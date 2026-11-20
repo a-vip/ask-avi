@@ -22,7 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { VOICE_STYLES } from '../data/persona';
+import { THINKING_EFFORTS } from '../data/persona';
 import { resolveEffectiveProxyUrl } from '../engine/llmService';
 import type { AppSettings, UserProfile } from '../types/chat';
 import {
@@ -305,30 +305,31 @@ export function SettingsModal({
               <section className="settings-section">
                 <div className="settings-section-title">
                   <Sparkles size={16} />
-                  <h3>Default Response Style</h3>
+                  <h3>Default Thinking Effort</h3>
                 </div>
                 <p className="settings-desc">
-                  Choose the conversational tone Avi uses when starting new threads.
+                  Choose whether Avi defaults to concise Fast answers, balanced Medium synthesis, or full Deep Reasoning.
                 </p>
                 <div className="voice-choice-grid">
-                  {VOICE_STYLES.map((voice) => {
-                    const selected = settings.voiceStyle === voice.id;
+                  {THINKING_EFFORTS.map((effort) => {
+                    const selected = settings.thinkingEffort === effort.id;
                     return (
                       <button
-                        key={voice.id}
+                        key={effort.id}
                         type="button"
                         className={`voice-choice-card ${selected ? 'active' : ''}`}
                         onClick={() =>
                           onUpdateSettings({
                             ...settings,
-                            voiceStyle: voice.id,
+                            thinkingEffort: effort.id,
                           })
                         }
                       >
                         <div className="voice-choice-top">
-                          <strong>{voice.label}</strong>
+                          <strong>{effort.label}</strong>
                           {selected && <Check size={14} />}
                         </div>
+                        <span className="effort-card-desc">{effort.shortDesc}</span>
                       </button>
                     );
                   })}

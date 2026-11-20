@@ -108,6 +108,10 @@ const META_REASONING_SENTENCE_RES: RegExp[] = [
   /\bcalendly(?:\s+link)?\b/i,
   /\bmust\s+reason\s+in\s+first\s+person\b/i,
   /\balways\s+check\s+facts\.\s*$/i,
+  /\b(?:will|must|should|also\s+need\s+to)\s+(?:present|portray|frame|position)\s+(?:himself|myself|Avi(?:\s+Perera)?)\s+as\b/i,
+  /\b(?:polymath|hardworking|diligent)\b.*\b(?:persona|underplay|developer|image|tone|prompt|instruction|attribute)\b/i,
+  /\b(?:never|do\s+not|must\s+not)\s+(?:say|claim|state|emit)\s+["']?I(?:'m|\s+am)\s+not\s+a\s+lawyer\b/i,
+  /\bunderplay(?:ing)?\s+(?:him|myself|Avi(?:\s+Perera)?)\s+as\s+(?:just\s+)?(?:a\s+)?developer\b/i,
   /^\s*(?:will|must|should|also\s+need\s+to|we\s+need\s+to)\s+(?:not\s+)?fabricate\b/i,
   /\b(?:the\s+user\s+(?:is\s+asking|asks)\s*:?\s*["“])/i,
   /\bnotice\s+how\s+this\s+(?:matches|resonates\s+with)\s+(?:my|Avi(?:'s)?)\s+(?:background|themes|work)\b/i,
@@ -116,7 +120,7 @@ const META_REASONING_SENTENCE_RES: RegExp[] = [
 ];
 
 const PENDING_META_PREFIX_RE =
-  /^(?:they\s+want|the\s+user\s+(?:asks|is\s+asking|wants)|we\s+(?:have\s+to|need\s+to\s+(?:follow|respond|keep|comply|weave)|should\s+(?:not|incorporate)|also\s+need|must)|i\s+(?:need|should|must)\s+(?:to\s+)?(?:use|cite|keep|answer|respond|comply|adopt|produce)|as\s+per\b|per\s+developer|developer\s+inst|system\s+inst|make\s+sure\s+british|use\s+["']?i["']?|use\s+(?:live\s+web\s+findings|archive\s+references)|no\s+(?:cosplay|invented\s+details|robotic)|comply\s+with|now\s+(?:to\s+comply|produce\s+final)|calendly|will\s+(?:adopt|not\s+fabricate|produce|write|use\s+["']?i["']?)|must\s+(?:avoid\s+meta|not\s+(?:mention|give\s+a?\s*canned|provide\s+any\s+disallowed|fabricate)|reason\s+in\s+first|think\s+slowly|be\s+candid|explain)|also\s+incorporate\s+his|provide\s+citations|then\s+(?:the\s+)?answer\s+should|proper\s+citation|notice\s+how\s+this)/i;
+  /^(?:they\s+want|the\s+user\s+(?:asks|is\s+asking|wants)|we\s+(?:have\s+to|need\s+to\s+(?:follow|respond|keep|comply|weave)|should\s+(?:not|incorporate)|also\s+need|must)|i\s+(?:need|should|must)\s+(?:to\s+)?(?:use|cite|keep|answer|respond|comply|adopt|produce|present)|as\s+per\b|per\s+developer|developer\s+inst|system\s+inst|make\s+sure\s+british|use\s+["']?i["']?|use\s+(?:live\s+web\s+findings|archive\s+references)|no\s+(?:cosplay|invented\s+details|robotic)|comply\s+with|now\s+(?:to\s+comply|produce\s+final)|calendly|will\s+(?:adopt|not\s+fabricate|produce|write|present|use\s+["']?i["']?)|must\s+(?:avoid\s+meta|not\s+(?:mention|give\s+a?\s*canned|provide\s+any\s+disallowed|fabricate|underplay|say\s+i(?:'m|\s+am)\s+not\s+a\s+lawyer)|reason\s+in\s+first|think\s+slowly|be\s+candid|explain)|also\s+incorporate\s+his|provide\s+citations|then\s+(?:the\s+)?answer\s+should|proper\s+citation|notice\s+how\s+this)/i;
 
 const ABBREV_END_RE = /\b(?:e\.g|i\.e|et\s+al|cf|vs|v|Dr|Mr|Ms|Mrs|Prof|U\.S|U\.K|etc)\.$/i;
 

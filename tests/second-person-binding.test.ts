@@ -72,7 +72,7 @@ describe('Second-person ("you"/"your") binding to Avi Perera', () => {
     expect(DEFAULT_SERVER_MASTER_PROMPT).toContain('never break frame into an AI assistant');
 
     const deliberatePrompt = assembleServerSystemPrompt({
-      voiceStyle: 'standard',
+      thinkingEffort: 'fast',
       archiveBlock: '',
       webContext: '',
       attachedContext: '',
@@ -83,8 +83,8 @@ describe('Second-person ("you"/"your") binding to Avi Perera', () => {
     expect(deliberatePrompt).toContain('Avi Perera personally, never an AI assistant or language model');
     expect(deliberatePrompt).not.toContain('REGISTER:');
 
-    const fallbackPrompt = buildAviSystemPrompt('standard', [], '', false);
-    expect(fallbackPrompt).toContain('every visitor "you" or "your" asks about Avi Perera personally');
+    const fallbackPrompt = buildAviSystemPrompt('fast', [], '', false);
+    expect(fallbackPrompt).toContain('Every visitor "you" or "your" asks about Avi Perera personally');
   });
 
   it('retrieves relevant personal writings via RAG query expansions for personal "you" queries', () => {

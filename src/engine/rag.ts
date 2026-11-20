@@ -33,6 +33,7 @@ const QUERY_EXPANSIONS: Array<[RegExp, string[]]> = [
   [/\breligio\w*|\bfaith\b|\bbeliefs?\b|\bspiritu\w*|\btheolog\w*|\bchurch\b|\bgod\b|\batheis\w*|\bagnostic\w*|\bbuddhis\w*/i, ['buddhist', 'buddhism', 'christian', 'atheism', 'belief', 'philosophy', 'evidence', 'encyclical']],
   [/\bwhere do you live\b|\bwhere are you based\b|\bthailand\b|\bbangkok\b|\blondon\b/i, ['bangkok', 'thailand', 'london', 'harrow', 'biography', 'nomad']],
   [/\bstudied\b|\bstudy\b|\bdegree\b|\beducation\b|\buniversity\b|\bqualifications?\b/i, ['cambridge', 'buckingham', 'imperial', 'essex', 'open', 'scholarship', 'biography']],
+  [/\blawyer\b|\bexpertise\b|\bexperience\b|\bcareer\b|\byour\s+(?:legal|policy|law|ai\s+policy)\s+(?:background|work|experience)\b/i, ['lawyer', 'biography', 'llb', 'buckingham', 'cambridge', 'unidir', 'ai', 'governance']],
 ];
 
 interface IndexedDoc {

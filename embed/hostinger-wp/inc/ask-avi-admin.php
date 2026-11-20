@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
  * provision database tables, and purge LiteSpeed caches on new theme version rollout.
  */
 add_action('init', static function () {
-  if (get_option('ask_avi_deployment_ver') === '20261119c') {
+  if (get_option('ask_avi_deployment_ver') === '20261120a') {
     return;
   }
 
@@ -45,7 +45,7 @@ add_action('init', static function () {
     }
   }
 
-  update_option('ask_avi_deployment_ver', '20261119c', false);
+  update_option('ask_avi_deployment_ver', '20261120a', false);
   flush_rewrite_rules(false);
   do_action('litespeed_purge_all');
   if (class_exists('\LiteSpeed\Purge')) {
@@ -181,7 +181,7 @@ add_action('admin_post_ask_avi_export_qa_csv', static function () {
     'User Email',
     'Thread ID',
     'Turn #',
-    'Voice Style',
+    'Thinking Effort',
     'Engine',
     'Model',
     'Latency (ms)',
@@ -639,7 +639,7 @@ function ask_avi_render_admin_page(): void {
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin:24px 0 10px;">
       <div>
         <h2 style="margin:0;">Complete Questions &amp; Answers Collection (<?php echo (int) $totalQaCount; ?> Total · Showing Latest <?php echo count($qaRows); ?>)</h2>
-        <p class="description" style="margin:2px 0 0;">Every visitor question/prompt submitted to Ask Avi alongside Avi&apos;s full response, model/register used, citations, and reasoning trace.</p>
+        <p class="description" style="margin:2px 0 0;">Every visitor question/prompt submitted to Ask Avi alongside Avi&apos;s full response, model/effort used, citations, and reasoning trace.</p>
       </div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <input

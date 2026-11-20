@@ -1,4 +1,4 @@
-import type { EngineId, ThemeMode, VoiceStyle } from '../types/chat';
+import type { EngineId, ThemeMode, ThinkingEffort, VoiceStyle } from '../types/chat';
 import { KNOWLEDGE_META } from '../engine/rag';
 
 export type CircadianSlot =
@@ -37,6 +37,7 @@ export interface GreetingVisitorInput {
   userName?: string | null;
   isAuthenticated?: boolean;
   threadCount?: number;
+  thinkingEffort?: ThinkingEffort;
   voiceStyle?: VoiceStyle;
   engineId?: EngineId;
   theme?: ThemeMode;
@@ -76,7 +77,8 @@ export interface ResolvedVisitorSignals {
   visitCount: number;
   hoursSinceLastVisit: number | null;
   consecutiveDays: number;
-  voiceStyle: VoiceStyle;
+  thinkingEffort: ThinkingEffort;
+  voiceStyle?: VoiceStyle;
   engineId: EngineId;
   theme: ThemeMode;
   corpusCount: number;
@@ -307,7 +309,10 @@ export function resolveVisitorSignals(input: GreetingVisitorInput = {}): Resolve
     visitCount: stats.visitCount,
     hoursSinceLastVisit,
     consecutiveDays: stats.consecutiveDays,
-    voiceStyle: input.voiceStyle ?? 'standard',
+    thinkingEffort:
+      input.thinkingEffort ??
+      (input.voiceStyle === 'academic' ? 'deep' : input.voiceStyle === 'mentor' ? 'medium' : 'fast'),
+    voiceStyle: input.voiceStyle,
     engineId: input.engineId ?? 'oss-reasoning',
     theme: input.theme ?? 'dark',
     corpusCount: input.corpusCount ?? KNOWLEDGE_META.totalEntries,
@@ -863,27 +868,27 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
     text: 'Round two. What is next?',
   },
 
-  // ── 12. Voice, Theme & Corpus Context ────────────────────────────────────
+  // ── 12. Thinking Effort, Theme & Corpus Context ─────────────────────────
   {
-    id: 'ctx-blunt-mode',
+    id: 'ctx-fast-mode',
     category: 'context',
-    weight: 6,
-    when: (c) => c.voiceStyle === 'blunt',
-    text: 'Blunt mode. Skip diplomacy.',
+    weight: 3,
+    when: (c) => c.thinkingEffort === 'fast',
+    text: 'Fast mode. Crisp answers.',
   },
   {
-    id: 'ctx-academic-mode',
+    id: 'ctx-medium-mode',
     category: 'context',
-    weight: 6,
-    when: (c) => c.voiceStyle === 'academic',
-    text: 'Treaty footnotes on standby.',
+    weight: 5,
+    when: (c) => c.thinkingEffort === 'medium',
+    text: 'Medium depth on standby.',
   },
   {
-    id: 'ctx-mentor-mode',
+    id: 'ctx-deep-mode',
     category: 'context',
     weight: 6,
-    when: (c) => c.voiceStyle === 'mentor',
-    text: 'Candid mode. Speak plainly.',
+    when: (c) => c.thinkingEffort === 'deep',
+    text: 'Deep reasoning active.',
   },
   {
     id: 'ctx-dark-night',
@@ -1010,7 +1015,10 @@ export const GREETING_REPOSITORY: GreetingEntry[] = [
 ];
 
 export function getEligibleGreetings(signals: ResolvedVisitorSignals): GreetingEntry[] {
-  const seriousOnly = signals.voiceStyle === 'academic' || signals.voiceStyle === 'blunt';
+  const seriousOnly =
+    signals.thinkingEffort === 'deep' ||
+    signals.voiceStyle === 'academic' ||
+    signals.voiceStyle === 'blunt';
   return GREETING_REPOSITORY.filter(
     (entry) => (!seriousOnly || !entry.playful) && (!entry.when || entry.when(signals))
   );
@@ -1025,14 +1033,21 @@ export function buildGreetingKicker(signals: ResolvedVisitorSignals): string {
     parts.push(signals.dayName);
   }
 
-  if (signals.voiceStyle !== 'standard') {
-    const labelMap: Record<VoiceStyle, string> = {
-      standard: 'Standard',
+  if (signals.thinkingEffort !== 'fast') {
+    const labelMap: Record<ThinkingEffort, string> = {
+      fast: 'Fast',
+      medium: 'Medium depth',
+      deep: 'Deep Reasoning',
+    };
+    parts.push(labelMap[signals.thinkingEffort]);
+  } else if (signals.voiceStyle && signals.voiceStyle !== 'standard') {
+    const legacyMap: Record<VoiceStyle, string> = {
+      standard: 'Fast',
       blunt: 'Blunt mode',
       academic: 'Legal & IR',
       mentor: 'Candid mode',
     };
-    parts.push(labelMap[signals.voiceStyle]);
+    parts.push(legacyMap[signals.voiceStyle]);
   } else if (signals.visitCount >= 3) {
     parts.push(`Visit #${signals.visitCount}`);
   } else if (signals.threadCount > 0) {
